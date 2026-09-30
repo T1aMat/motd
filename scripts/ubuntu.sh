@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.0.1"
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/ubuntu.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
@@ -32,25 +32,47 @@ if [[ ! -t 1 ]]; then
 fi
 
 SCRIPT_NAME="T1aMat MOTD"
+UI_WIDTH=50
 
 say() { printf '%b\n' "$*"; }
 
+repeat_char() {
+    local char="$1" count="$2" out="" i
+    for ((i=0; i<count; i++)); do
+        out+="$char"
+    done
+    printf '%s' "$out"
+}
+
+center_text() {
+    local text="$1"
+    local len=${#text}
+    local left=$(( (UI_WIDTH - len) / 2 ))
+    local right=$(( UI_WIDTH - len - left ))
+    printf '%*s%s%*s' "$left" '' "$text" "$right" ''
+}
+
 banner() {
+    local title="T1aMat MOTD"
+    local subtitle="Ubuntu installer v${SCRIPT_VERSION}"
     clear 2>/dev/null || true
-    say "${CYAN}${BOLD}╔══════════════════════════════════════════════════╗${RESET}"
-    say "${CYAN}${BOLD}║                 ${WHITE}T1aMat MOTD${CYAN}                  ║${RESET}"
-    say "${CYAN}${BOLD}║            ${GRAY}Ubuntu installer v${SCRIPT_VERSION}${CYAN}             ║${RESET}"
-    say "${CYAN}${BOLD}╚══════════════════════════════════════════════════╝${RESET}"
+    say "${CYAN}${BOLD}╔$(repeat_char "═" "$UI_WIDTH")╗${RESET}"
+    say "${CYAN}${BOLD}║${WHITE}$(center_text "$title")${CYAN}${BOLD}║${RESET}"
+    say "${CYAN}${BOLD}║${GRAY}$(center_text "$subtitle")${CYAN}${BOLD}║${RESET}"
+    say "${CYAN}${BOLD}╚$(repeat_char "═" "$UI_WIDTH")╝${RESET}"
     echo
 }
 
 section() {
     local title="$1"
-    say "${CYAN}${BOLD}┌─ ${title} ──────────────────────────────────────┐${RESET}"
+    local prefix="┌─ ${title} "
+    local filler=$(( UI_WIDTH - ${#prefix} ))
+    (( filler < 0 )) && filler=0
+    say "${CYAN}${BOLD}${prefix}$(repeat_char "─" "$filler")┐${RESET}"
 }
 
 section_end() {
-    say "${CYAN}${BOLD}└──────────────────────────────────────────────────┘${RESET}"
+    say "${CYAN}${BOLD}└$(repeat_char "─" "$UI_WIDTH")┘${RESET}"
 }
 
 info() { say "${CYAN}ℹ${RESET}  $*"; }
@@ -103,10 +125,10 @@ system_summary() {
     local pretty="Ubuntu"
     [[ -f /etc/os-release ]] && . /etc/os-release && pretty="${PRETTY_NAME:-Ubuntu}"
     section "System"
-    say "  ${GRAY}OS${RESET}        : ${pretty}"
-    say "  ${GRAY}Hostname${RESET}  : $(hostname 2>/dev/null || echo unknown)"
-    say "  ${GRAY}Kernel${RESET}    : $(uname -r 2>/dev/null || echo unknown)"
-    say "  ${GRAY}Architecture${RESET}: $(uname -m 2>/dev/null || echo unknown)"
+    say "  ${GRAY}$(printf '%-12s' 'OS')${RESET} : ${pretty}"
+    say "  ${GRAY}$(printf '%-12s' 'Hostname')${RESET} : $(hostname 2>/dev/null || echo unknown)"
+    say "  ${GRAY}$(printf '%-12s' 'Kernel')${RESET} : $(uname -r 2>/dev/null || echo unknown)"
+    say "  ${GRAY}$(printf '%-12s' 'Architecture')${RESET} : $(uname -m 2>/dev/null || echo unknown)"
     section_end
     echo
 }
@@ -487,9 +509,9 @@ show_menu() {
     system_summary
 
     section "Main menu"
-    say "  ${YELLOW}1${RESET}  Install / update MOTD"
-    say "  ${YELLOW}2${RESET}  Uninstall / restore MOTD"
-    say "  ${YELLOW}0${RESET}  Exit"
+    say "  ${YELLOW}1)${RESET} Install / update MOTD"
+    say "  ${YELLOW}2)${RESET} Uninstall / restore MOTD"
+    say "  ${YELLOW}0)${RESET} Exit"
     section_end
     echo
 
