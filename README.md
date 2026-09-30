@@ -1,4 +1,4 @@
-# Spookdev-MOTD (edited by [@Skrepysh](https://github.com/Skrepysh/motd))
+# Fork Spookdev-MOTD (edited by [@Skrepysh](https://github.com/Skrepysh/motd))
 
 ![MOTD-Screen](https://github.com/T1aMat/motd/blob/0aa25930a5bb7fd26ef8151f3f0be4739fbc5fc3/screenshot.png)
 
