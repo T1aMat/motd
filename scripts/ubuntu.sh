@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+SCRIPT_VERSION="2.0.0"
+SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/ubuntu.sh"
+REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
+
 MOTD_DIR="/etc/update-motd.d"
 OLD_MOTD_DIR="${MOTD_DIR}/old-motd"
 STATE_DIR="/var/lib/t1amat-motd"
@@ -9,27 +13,147 @@ SSH_CONFIG="/etc/ssh/sshd_config"
 SSH_BACKUP="${STATE_DIR}/sshd_config.backup"
 SSH_HASH="${STATE_DIR}/sshd_config.installed.sha256"
 
-REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
+# -----------------------------------------------------------------------------
+# Colors / UI
+# -----------------------------------------------------------------------------
+RESET='\033[0m'
+BOLD='\033[1m'
+DIM='\033[2m'
+GREEN='\033[1;32m'
+CYAN='\033[1;36m'
+YELLOW='\033[1;33m'
+RED='\033[1;31m'
+WHITE='\033[1;37m'
+GRAY='\033[0;90m'
+BLUE='\033[1;34m'
 
-require_root() {
-    if [[ "$EUID" -ne 0 ]]; then
-        echo "Please run this script as root or with sudo."
-        exit 1
-    fi
+if [[ ! -t 1 ]]; then
+    RESET=''; BOLD=''; DIM=''; GREEN=''; CYAN=''; YELLOW=''; RED=''; WHITE=''; GRAY=''; BLUE=''
+fi
+
+SCRIPT_NAME="T1aMat MOTD"
+
+say() { printf '%b\n' "$*"; }
+
+banner() {
+    clear 2>/dev/null || true
+    say "${CYAN}${BOLD}╔══════════════════════════════════════════════════╗${RESET}"
+    say "${CYAN}${BOLD}║                 ${WHITE}T1aMat MOTD${CYAN}                  ║${RESET}"
+    say "${CYAN}${BOLD}║            ${GRAY}Ubuntu installer v${SCRIPT_VERSION}${CYAN}             ║${RESET}"
+    say "${CYAN}${BOLD}╚══════════════════════════════════════════════════╝${RESET}"
+    echo
 }
 
-configure_printlastlog() {
+section() {
+    local title="$1"
+    say "${CYAN}${BOLD}┌─ ${title} ──────────────────────────────────────┐${RESET}"
+}
+
+section_end() {
+    say "${CYAN}${BOLD}└──────────────────────────────────────────────────┘${RESET}"
+}
+
+info() { say "${CYAN}ℹ${RESET}  $*"; }
+ok() { say "${GREEN}✔${RESET}  $*"; }
+warn() { say "${YELLOW}⚠${RESET}  $*"; }
+fail() { say "${RED}✖${RESET}  $*"; }
+step() { say "${WHITE}${BOLD}›${RESET}  $*"; }
+
+run_step() {
+    local label="$1"
+    shift
+    local log pid rc i=0
+    local spin='|/-\\'
+    log="$(mktemp)"
+
+    printf '  ${WHITE}%-42s${RESET} ' "$label"
+    "$@" >"$log" 2>&1 &
+    pid=$!
+
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '\b[%c]' "${spin:i++%4:1}"
+        sleep 0.12
+    done
+
+    if wait "$pid"; then
+        printf '\b${GREEN}✔${RESET}\n'
+        rm -f "$log"
+        return 0
+    fi
+
+    printf '\b${RED}✖${RESET}\n'
+    sed -n '1,20p' "$log"
+    rm -f "$log"
+    return 1
+}
+
+confirm() {
+    local prompt="$1"
+    local answer
+    read -r -p "${prompt} [Y/n] " answer
+    [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]]
+}
+
+pause_screen() {
     echo
-    echo "== Configuring SSH PrintLastLog =="
+    read -r -p "Press Enter to continue..." _
+}
+
+system_summary() {
+    local pretty="Ubuntu"
+    [[ -f /etc/os-release ]] && . /etc/os-release && pretty="${PRETTY_NAME:-Ubuntu}"
+    section "System"
+    say "  ${GRAY}OS${RESET}        : ${pretty}"
+    say "  ${GRAY}Hostname${RESET}  : $(hostname 2>/dev/null || echo unknown)"
+    say "  ${GRAY}Kernel${RESET}    : $(uname -r 2>/dev/null || echo unknown)"
+    say "  ${GRAY}Architecture${RESET}: $(uname -m 2>/dev/null || echo unknown)"
+    section_end
+    echo
+}
+
+# -----------------------------------------------------------------------------
+# Privilege handling
+# -----------------------------------------------------------------------------
+require_root() {
+    if [[ "$EUID" -eq 0 ]]; then
+        return 0
+    fi
+
+    if ! command -v sudo >/dev/null 2>&1; then
+        fail "Root privileges are required and sudo is not installed."
+        exit 1
+    fi
+
+    info "Root privileges are required. Re-running with sudo..."
+    echo
+
+    if [[ -f "$0" && "$0" != /dev/fd/* && "$0" != /proc/* ]]; then
+        exec sudo bash "$0" "$@"
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        fail "curl is required to re-launch the remote installer."
+        exit 1
+    fi
+
+    exec sudo bash -c 'curl -fsSL "$1" | bash -s -- "${@:2}"' _ "$SCRIPT_URL" "$@"
+}
+
+# -----------------------------------------------------------------------------
+# SSH PrintLastLog
+# -----------------------------------------------------------------------------
+configure_printlastlog() {
+    section "SSH login message"
+    step "Checking PrintLastLog overrides..."
 
     local overrides
     overrides="$(grep -RnsE '^[[:space:]]*PrintLastLog[[:space:]]+' /etc/ssh/sshd_config.d 2>/dev/null || true)"
 
     if [[ -n "$overrides" ]]; then
-        echo "Active PrintLastLog override found:"
-        echo "$overrides"
-        echo
-        echo "Leaving $SSH_CONFIG unchanged."
+        warn "An active PrintLastLog override exists in sshd_config.d."
+        say "  ${GRAY}${overrides}${RESET}"
+        info "The main sshd_config will not be modified."
+        section_end
         return 0
     fi
 
@@ -79,64 +203,67 @@ if new_content != old_content:
     if not backup.exists():
         shutil.copy2(config, backup)
     config.write_text(new_content)
-    print("PrintLastLog changed to: no")
-    print(f"SSH configuration backup: {backup}")
+    print("changed")
 else:
-    print("PrintLastLog is already configured as: no")
+    print("unchanged")
 PY
 
-    echo "Validating SSH configuration..."
     if ! sshd -t; then
-        echo
-        echo "ERROR: sshd configuration validation failed."
-        if [[ -f "$SSH_BACKUP" ]]; then
-            cp -f "$SSH_BACKUP" "$SSH_CONFIG"
-        fi
+        fail "sshd configuration validation failed."
+        [[ -f "$SSH_BACKUP" ]] && cp -f "$SSH_BACKUP" "$SSH_CONFIG"
+        section_end
         exit 1
     fi
 
     if [[ -f "$SSH_BACKUP" ]]; then
         sha256sum "$SSH_CONFIG" > "$SSH_HASH"
-    fi
-
-    echo "Reloading SSH..."
-    if systemctl reload ssh 2>/dev/null; then
-        :
-    elif systemctl reload sshd 2>/dev/null; then
-        :
+        ok "PrintLastLog set to no."
     else
-        echo "WARNING: Could not reload SSH automatically."
-        echo "The configuration itself is valid."
+        ok "PrintLastLog was already set to no."
     fi
 
-    echo "Effective setting:"
-    sshd -T | grep -i '^printlastlog '
+    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+        ok "SSH configuration reloaded."
+    else
+        warn "SSH configuration is valid, but automatic reload failed."
+    fi
+
+    say "  ${GRAY}Effective setting:${RESET} $(sshd -T | grep -i '^printlastlog ' || true)"
+    section_end
 }
 
+# -----------------------------------------------------------------------------
+# Header customization
+# -----------------------------------------------------------------------------
 configure_header() {
     local header_file="${MOTD_DIR}/00-header"
     local current_header=""
     local header_name
 
-    echo
-    echo "== MOTD Header =="
+    section "MOTD header"
 
     if [[ ! -f "$header_file" ]]; then
-        echo "WARNING: $header_file does not exist."
+        warn "$header_file was not found."
+        section_end
         return 0
     fi
 
-    current_header="$(sed -n 's/.*toilet .* -f ivrit \("\|\x27\)\(.*\)\1.*/\2/p' "$header_file" | head -n1 || true)"
+    current_header="$(python3 - "$header_file" <<'PY'
+import re
+from pathlib import Path
+text = Path(__import__('sys').argv[1]).read_text()
+m = re.search(r'toilet\s+-d\s+/etc/update-motd\.d/\s+-f\s+ivrit\s+(["\x27])(.*?)(?:\1)\s*$', text, re.M)
+print(m.group(2) if m else "T1aMat")
+PY
+)"
 
-    if [[ -z "$current_header" ]]; then
-        current_header="T1aMat"
-    fi
-
-    echo "Current header: $current_header"
-    read -r -p "Enter new header name [keep $current_header]: " header_name
+    say "  ${GRAY}Current header:${RESET} ${WHITE}${current_header}${RESET}"
+    echo
+    read -r -p "  New header [Enter = keep ${current_header}]: " header_name
 
     if [[ -z "$header_name" ]]; then
-        echo "Keeping header as: $current_header"
+        ok "Keeping header: ${current_header}"
+        section_end
         return 0
     fi
 
@@ -148,258 +275,250 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 header = sys.argv[2]
-
 text = path.read_text()
-pattern = re.compile(r'(toilet\s+-d\s+/etc/update-motd\.d/\s+-f\s+ivrit\s+)(["\']).*?\2')
+pattern = re.compile(r'(toilet\s+-d\s+/etc/update-motd\.d/\s+-f\s+ivrit\s+)(["\x27]).*?\2')
 new_text, count = pattern.subn(lambda m: m.group(1) + json.dumps(header), text, count=1)
-
 if count != 1:
-    print("ERROR: Could not find the expected toilet header line.")
+    print("Could not find the expected toilet header line.")
     sys.exit(1)
-
 path.write_text(new_text)
 PY
 
-    echo "Header changed to: $header_name"
+    ok "Header changed to: ${header_name}"
+    section_end
 }
 
+# -----------------------------------------------------------------------------
+# MOTD backup / restore
+# -----------------------------------------------------------------------------
 backup_old_motd() {
-    echo
-    echo "== Backing up old MOTD =="
+    section "Existing MOTD"
 
     mkdir -p "$MOTD_DIR"
 
     if [[ -d "$OLD_MOTD_DIR" ]] && find "$OLD_MOTD_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-        echo "Existing backup found: $OLD_MOTD_DIR"
-        echo "Keeping the existing backup."
-
+        ok "Original MOTD backup already exists."
+        info "Keeping: $OLD_MOTD_DIR"
         find "$MOTD_DIR" -mindepth 1 -maxdepth 1 ! -name "old-motd" -exec rm -rf {} +
+        section_end
         return 0
     fi
 
     mkdir -p "$OLD_MOTD_DIR"
-
     find "$MOTD_DIR" -mindepth 1 -maxdepth 1 ! -name "old-motd" -exec mv {} "$OLD_MOTD_DIR"/ \;
-
-    echo "Old MOTD backed up to: $OLD_MOTD_DIR"
+    ok "Original MOTD backed up."
+    say "  ${GRAY}Backup:${RESET} $OLD_MOTD_DIR"
+    section_end
 }
 
+# -----------------------------------------------------------------------------
+# Installation
+# -----------------------------------------------------------------------------
 install_motd() {
-    clear
+    banner
+    system_summary
 
-    echo "Hi! This script will install custom MOTD for Ubuntu."
+    section "Install MOTD"
+    say "  This will install the custom T1aMat MOTD, preserve the"
+    say "  existing MOTD, configure the SSH login message and let"
+    say "  you choose the big ASCII header."
+    section_end
     echo
-    read -r -p "Continue? [Y/n] " reply
 
-    if [[ ! "$reply" =~ ^([Yy]|)$ ]]; then
-        echo "Installation cancelled."
-        exit 0
+    if ! confirm "Continue with installation?"; then
+        warn "Installation cancelled."
+        return 0
     fi
 
     echo
-    echo "== Installing utilities =="
+    section "Dependencies"
+    run_step "Updating package lists" apt-get update -qq
+    run_step "Installing toilet" apt-get install -y -qq toilet
+    run_step "Installing colorized-logs" apt-get install -y -qq colorized-logs
+    section_end
 
-    echo -n "    - updating repos....."
-    apt-get update >/dev/null 2>&1
-    echo "done"
+    local tmp_dir archive source_dir
+    tmp_dir="$(mktemp -d)"
+    archive="${tmp_dir}/motd.tar.gz"
 
-    echo -n "    - toilet............."
-    apt-get install -y toilet >/dev/null 2>&1
-    echo "done"
-
-    echo -n "    - colorized-logs....."
-    apt-get install -y colorized-logs >/dev/null 2>&1
-    echo "done"
-
-    echo
-    echo "Utilities installed successfully."
-
-    TMP_DIR="$(mktemp -d)"
-    ARCHIVE="${TMP_DIR}/motd.tar.gz"
-
-    cleanup_install() {
-        rm -rf "$TMP_DIR"
-    }
+    cleanup_install() { rm -rf "$tmp_dir"; }
     trap cleanup_install EXIT
 
     echo
-    echo "== Downloading MOTD =="
-    printf 'Downloading: '
-
-    if ! curl \
-        --fail \
-        --location \
-        --progress-bar \
-        --show-error \
-        --connect-timeout 15 \
-        --max-time 120 \
-        --retry 2 \
-        --retry-delay 2 \
-        -o "$ARCHIVE" \
-        "$REPO_URL"; then
+    section "Downloading MOTD"
+    printf '  ${WHITE}GitHub release${RESET}   '
+    if ! curl --fail --location --progress-bar --show-error \
+        --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2 \
+        -o "$archive" "$REPO_URL"; then
         echo
-        echo "ERROR: Failed to download MOTD from GitHub."
-        echo "Check DNS, Internet connectivity, and GitHub accessibility."
+        fail "Download failed. Check DNS, Internet connectivity and GitHub access."
         exit 1
     fi
-
-    if [[ ! -s "$ARCHIVE" ]]; then
-        echo
-        echo "ERROR: Downloaded archive is empty."
-        exit 1
-    fi
+    echo
+    [[ -s "$archive" ]] || { fail "Downloaded archive is empty."; exit 1; }
+    ok "Download complete."
+    section_end
 
     echo
-    echo "Extracting MOTD..."
+    section "Preparing files"
+    run_step "Extracting MOTD archive" tar -xzf "$archive" -C "$tmp_dir"
+    source_dir="${tmp_dir}/motd-master/motd"
+    [[ -d "$source_dir" ]] || { fail "Unexpected archive structure."; exit 1; }
+    ok "MOTD archive is ready."
+    section_end
 
-    if ! tar -xzf "$ARCHIVE" -C "$TMP_DIR"; then
-        echo
-        echo "ERROR: Failed to extract MOTD archive."
-        exit 1
-    fi
-
-    SOURCE_DIR="${TMP_DIR}/motd-master/motd"
-
-    if [[ ! -d "$SOURCE_DIR" ]]; then
-        echo
-        echo "ERROR: Downloaded archive has unexpected structure."
-        echo "Archive contents:"
-        tar -tzf "$ARCHIVE" | head -30
-        exit 1
-    fi
-
-    echo "MOTD downloaded and extracted successfully."
-
+    echo
     backup_old_motd
 
     echo
-    echo "== Installing MOTD =="
-    cp -a "$SOURCE_DIR"/. "$MOTD_DIR"/
+    section "Installing MOTD"
+    run_step "Copying MOTD files" cp -a "$source_dir/." "$MOTD_DIR/"
+    run_step "Setting executable permissions" bash -c 'chmod +x /etc/update-motd.d/* 2>/dev/null || true'
+    section_end
 
-    echo "Setting permissions..."
-    chmod +x "$MOTD_DIR"/* 2>/dev/null || true
-
+    echo
     configure_header
+    echo
     configure_printlastlog
 
     echo
-    echo "== Installation complete =="
-    echo "MOTD location: $MOTD_DIR"
-    echo "Original MOTD backup: $OLD_MOTD_DIR"
+    section "Installation complete"
+    ok "T1aMat MOTD is installed."
+    say "  ${GRAY}MOTD directory${RESET} : $MOTD_DIR"
+    say "  ${GRAY}Original backup${RESET}: $OLD_MOTD_DIR"
     echo
-    echo "Uninstall and restore with:"
-    echo "  sudo $0 uninstall"
+    say "${GREEN}${BOLD}Enjoy your new MOTD.${RESET}"
+    section_end
 }
 
+# -----------------------------------------------------------------------------
+# SSH restore
+# -----------------------------------------------------------------------------
 restore_printlastlog() {
-    echo
-    echo "== Restoring SSH configuration =="
+    section "Restoring SSH configuration"
 
     if [[ ! -f "$SSH_BACKUP" ]]; then
-        echo "No SSH configuration backup was created by this installer."
+        info "No SSH configuration backup was created by this installer."
+        section_end
         return 0
     fi
 
     if [[ -f "$SSH_HASH" ]]; then
+        local current_hash installed_hash
         current_hash="$(sha256sum "$SSH_CONFIG" | awk '{print $1}')"
         installed_hash="$(awk '{print $1}' "$SSH_HASH")"
-
         if [[ "$current_hash" != "$installed_hash" ]]; then
-            echo
-            echo "WARNING: $SSH_CONFIG was changed after MOTD installation."
-            echo "The newer SSH configuration will not be overwritten."
-            echo "Original backup remains at: $SSH_BACKUP"
+            warn "$SSH_CONFIG was changed after installation."
+            info "The newer configuration will not be overwritten."
+            info "Original backup: $SSH_BACKUP"
+            section_end
             return 0
         fi
     fi
 
     cp -f "$SSH_BACKUP" "$SSH_CONFIG"
-
     if ! sshd -t; then
-        echo "ERROR: Restored SSH configuration failed validation."
+        fail "Restored SSH configuration failed validation."
         return 1
     fi
 
-    if systemctl reload ssh 2>/dev/null; then
-        :
-    elif systemctl reload sshd 2>/dev/null; then
-        :
+    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+        ok "Original SSH configuration restored."
     else
-        echo "WARNING: Could not reload SSH automatically."
+        warn "SSH restored, but automatic reload failed."
     fi
 
     rm -f "$SSH_BACKUP" "$SSH_HASH"
-    echo "Original SSH configuration restored."
+    section_end
 }
 
+# -----------------------------------------------------------------------------
+# Uninstall
+# -----------------------------------------------------------------------------
 uninstall_motd() {
-    clear
+    banner
+    system_summary
 
-    echo "== Uninstall custom MOTD =="
+    section "Uninstall MOTD"
+    say "  The custom MOTD will be removed and the original MOTD"
+    say "  will be restored from the protected backup."
+    say "  SSH PrintLastLog will also be restored when safe."
+    section_end
     echo
 
     if [[ ! -d "$OLD_MOTD_DIR" ]]; then
-        echo "No MOTD backup found at: $OLD_MOTD_DIR"
-        echo "Nothing to uninstall."
-        exit 0
+        warn "No original MOTD backup was found."
+        info "Nothing to restore."
+        return 0
     fi
 
-    echo "This will remove the custom MOTD and restore the original MOTD."
-    echo "It will also restore PrintLastLog if this installer changed it."
+    if ! confirm "Continue with uninstall?"; then
+        warn "Uninstall cancelled."
+        return 0
+    fi
+
     echo
-    read -r -p "Continue? [y/N] " reply
-
-    if [[ ! "$reply" =~ ^([Yy])$ ]]; then
-        echo "Uninstallation cancelled."
-        exit 0
-    fi
-
-    TEMP_CURRENT="$(mktemp -d)"
-
-    find "$MOTD_DIR" -mindepth 1 -maxdepth 1 ! -name "old-motd" -exec mv {} "$TEMP_CURRENT"/ \;
+    section "Restoring MOTD"
+    local temp_current
+    temp_current="$(mktemp -d)"
+    find "$MOTD_DIR" -mindepth 1 -maxdepth 1 ! -name "old-motd" -exec mv {} "$temp_current"/ \;
     find "$OLD_MOTD_DIR" -mindepth 1 -maxdepth 1 -exec mv {} "$MOTD_DIR"/ \;
-
     rmdir "$OLD_MOTD_DIR" 2>/dev/null || true
-    rm -rf "$TEMP_CURRENT"
+    rm -rf "$temp_current"
+    ok "Original MOTD restored."
+    section_end
 
+    echo
     restore_printlastlog
-
     rmdir "$STATE_DIR" 2>/dev/null || true
 
     echo
-    echo "== Uninstallation complete =="
-    echo "Original MOTD has been restored."
+    section "Complete"
+    ok "T1aMat MOTD has been uninstalled."
+    say "${GREEN}${BOLD}The server is back to its previous MOTD state.${RESET}"
+    section_end
 }
 
-require_root
+# -----------------------------------------------------------------------------
+# Main menu
+# -----------------------------------------------------------------------------
+show_menu() {
+    banner
+    system_summary
 
-case "${1:-}" in
-    install)
-        install_motd
-        ;;
-    uninstall|remove)
-        uninstall_motd
-        ;;
-    "")
-        clear
-        echo "T1aMat MOTD installer"
-        echo
-        echo "  1) Install / update MOTD"
-        echo "  2) Uninstall and restore original MOTD"
-        echo "  3) Cancel"
-        echo
-        read -r -p "Select [1-3]: " choice
-        case "$choice" in
-            1) install_motd ;;
-            2) uninstall_motd ;;
-            *) echo "Cancelled." ;;
-        esac
-        ;;
-    *)
-        echo "Usage:"
-        echo "  sudo $0"
-        echo "  sudo $0 install"
-        echo "  sudo $0 uninstall"
-        exit 1
-        ;;
-esac
+    section "Main menu"
+    say "  ${YELLOW}1${RESET}  Install / update MOTD"
+    say "  ${YELLOW}2${RESET}  Uninstall / restore MOTD"
+    say "  ${YELLOW}0${RESET}  Exit"
+    section_end
+    echo
+
+    local choice
+    read -r -p "Select an option [0-2]: " choice
+    case "$choice" in
+        1) install_motd ;;
+        2) uninstall_motd ;;
+        0) info "Goodbye." ;;
+        *) warn "Invalid choice."; pause_screen; show_menu ;;
+    esac
+}
+
+usage() {
+    echo "Usage:"
+    echo "  bash <(curl -Ls $SCRIPT_URL)"
+    echo "  bash <(curl -Ls $SCRIPT_URL) install"
+    echo "  bash <(curl -Ls $SCRIPT_URL) uninstall"
+}
+
+main() {
+    require_root "$@"
+    case "${1:-}" in
+        install) install_motd ;;
+        uninstall|remove) uninstall_motd ;;
+        "") show_menu ;;
+        -h|--help) usage ;;
+        *) fail "Unknown option: $1"; usage; exit 1 ;;
+    esac
+}
+
+main "$@"
