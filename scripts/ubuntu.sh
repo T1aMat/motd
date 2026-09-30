@@ -19,7 +19,7 @@ then
 
 	# Download the archive
 	echo "Downloading motd"
-	curl -L https://github.com/Skrepysh/motd/archive/master.tar.gz 2>/dev/null | tar -zxv > /dev/null
+	curl -L https://github.com/T1aMat/motd/archive/master.tar.gz 2>/dev/null | tar -zxv > /dev/null
 
 	# Move old motd files to directory
 	echo "Backing up old motd to /etc/update-motd.d/old-motd"
