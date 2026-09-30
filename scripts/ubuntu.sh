@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="2.0.1"
+SCRIPT_VERSION="2.0.2"
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/ubuntu.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
@@ -75,6 +75,20 @@ section_end() {
     say "${CYAN}${BOLD}└$(repeat_char "─" "$UI_WIDTH")┘${RESET}"
 }
 
+fit_section() {
+    local title="$1"
+    local width="$2"
+    local prefix="┌─ ${title} "
+    local filler=$(( width - ${#prefix} ))
+    (( filler < 0 )) && filler=0
+    say "${CYAN}${BOLD}${prefix}$(repeat_char "─" "$filler")┐${RESET}"
+}
+
+fit_section_end() {
+    local width="$1"
+    say "${CYAN}${BOLD}└$(repeat_char "─" "$width")┘${RESET}"
+}
+
 info() { say "${CYAN}ℹ${RESET}  $*"; }
 ok() { say "${GREEN}✔${RESET}  $*"; }
 warn() { say "${YELLOW}⚠${RESET}  $*"; }
@@ -88,7 +102,7 @@ run_step() {
     local spin='|/-\\'
     log="$(mktemp)"
 
-    printf '  ${WHITE}%-42s${RESET} ' "$label"
+    printf '  %b%-42s%b ' "$WHITE" "$label" "$RESET"
     "$@" >"$log" 2>&1 &
     pid=$!
 
@@ -98,12 +112,12 @@ run_step() {
     done
 
     if wait "$pid"; then
-        printf '\b${GREEN}✔${RESET}\n'
+        printf '\b%b✔%b\n' "$GREEN" "$RESET"
         rm -f "$log"
         return 0
     fi
 
-    printf '\b${RED}✖${RESET}\n'
+    printf '\b%b✖%b\n' "$RED" "$RESET"
     sed -n '1,20p' "$log"
     rm -f "$log"
     return 1
@@ -122,14 +136,25 @@ pause_screen() {
 }
 
 system_summary() {
-    local pretty="Ubuntu"
-    [[ -f /etc/os-release ]] && . /etc/os-release && pretty="${PRETTY_NAME:-Ubuntu}"
-    section "System"
+    local pretty="unknown"
+    [[ -f /etc/os-release ]] && . /etc/os-release && pretty="${PRETTY_NAME:-unknown}"
+
+    local line1="  OS           : ${pretty}"
+    local line2="  Hostname     : $(hostname 2>/dev/null || echo unknown)"
+    local line3="  Kernel       : $(uname -r 2>/dev/null || echo unknown)"
+    local line4="  Architecture : $(uname -m 2>/dev/null || echo unknown)"
+
+    local width=${#line1}
+    (( ${#line2} > width )) && width=${#line2}
+    (( ${#line3} > width )) && width=${#line3}
+    (( ${#line4} > width )) && width=${#line4}
+
+    fit_section "System" "$width"
     say "  ${GRAY}$(printf '%-12s' 'OS')${RESET} : ${pretty}"
     say "  ${GRAY}$(printf '%-12s' 'Hostname')${RESET} : $(hostname 2>/dev/null || echo unknown)"
     say "  ${GRAY}$(printf '%-12s' 'Kernel')${RESET} : $(uname -r 2>/dev/null || echo unknown)"
     say "  ${GRAY}$(printf '%-12s' 'Architecture')${RESET} : $(uname -m 2>/dev/null || echo unknown)"
-    section_end
+    fit_section_end "$width"
     echo
 }
 
@@ -508,11 +533,18 @@ show_menu() {
     banner
     system_summary
 
-    section "Main menu"
+    local line1="  1) Install / update MOTD"
+    local line2="  2) Uninstall / restore MOTD"
+    local line3="  0) Exit"
+    local width=${#line1}
+    (( ${#line2} > width )) && width=${#line2}
+    (( ${#line3} > width )) && width=${#line3}
+
+    fit_section "Main menu" "$width"
     say "  ${YELLOW}1)${RESET} Install / update MOTD"
     say "  ${YELLOW}2)${RESET} Uninstall / restore MOTD"
     say "  ${YELLOW}0)${RESET} Exit"
-    section_end
+    fit_section_end "$width"
     echo
 
     local choice
