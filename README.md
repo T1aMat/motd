@@ -7,25 +7,14 @@ Custom MOTD scripts based off of PlexMOTD. This is running on Ubuntu or Debian, 
 ## Installation
 1. Run the motd install script: 
  - For Ubuntu:
-
-Install
 ```
-curl -fsSL https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/ubuntu.sh | sudo bash -s -- install
-```
-Uninstall
-```
-curl -fsSL https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/ubuntu.sh | sudo bash -s -- uninstall
+bash <(curl -Ls https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/ubuntu.sh)
 ```
 - For Debian:
+```
+bash <(curl -Ls https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/debian.sh)
+```
 
-Install
-```
-curl -fsSL https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/debian.sh | sudo bash -s -- install
-```
-Uninstall
-```
-curl -fsSL https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/debian.sh | sudo bash -s -- uninstall
-```
 2. Change `/etc/update-motd.d/colors.txt` to your liking.
 3. Change services in `/etc/update-motd.d/09-services` to suit your needs.
 4. Optionally change `PrintLastLog` to `yes` in `/etc/ssh/sshd_config`.
