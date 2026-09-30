@@ -18,6 +18,12 @@ services_order+=("vnstat")
 services["ufw"]="UFW"
 services_order+=("ufw")
 
+services["docker"]="Docker"
+services_order+=("docker")
+
+services["nginx"]="nginx"
+services_order+=("nginx")
+
 # Colors
 CO="${CO:-\e[32m}"
 CE="${CE:-\e[31m}"
