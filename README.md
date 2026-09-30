@@ -1,6 +1,6 @@
 # Spookdev-MOTD (edited by Skrepysh)
 
-![MOTD-Screen](https://github.com/T1aMat/motd/blob/master/screenshot.png)
+![MOTD-Screen](https://github.com/T1aMat/motd/blob/0aa25930a5bb7fd26ef8151f3f0be4739fbc5fc3/screenshot.png)
 
 Custom MOTD scripts based off of PlexMOTD. This is running on Ubuntu or Debian, and the scripts are split into manageable chunks.
 
