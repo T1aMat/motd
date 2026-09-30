@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="2.0.2"
+SCRIPT_VERSION="2.0.3"
 UI_WIDTH=50
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/debian.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
@@ -62,28 +62,18 @@ banner() {
 
 section() {
     local title="$1"
-    local prefix="┌─ ${title} "
-    local filler=$(( UI_WIDTH - ${#prefix} ))
-    (( filler < 0 )) && filler=0
-    say "${CYAN}${BOLD}${prefix}$(repeat_char "─" "$filler")┐${RESET}"
+    local dashes=$(( UI_WIDTH - ${#title} - 2 ))
+    local left=$(( dashes / 2 ))
+    local right=$(( dashes - left ))
+
+    (( left < 0 )) && left=0
+    (( right < 0 )) && right=0
+
+    say "${CYAN}${BOLD}┌$(repeat_char "─" "$left") ${title} $(repeat_char "─" "$right")┐${RESET}"
 }
 
 section_end() {
     say "${CYAN}${BOLD}└$(repeat_char "─" "$UI_WIDTH")┘${RESET}"
-}
-
-fit_section() {
-    local title="$1"
-    local width="$2"
-    local prefix="┌─ ${title} "
-    local filler=$(( width - ${#prefix} ))
-    (( filler < 0 )) && filler=0
-    say "${CYAN}${BOLD}${prefix}$(repeat_char "─" "$filler")┐${RESET}"
-}
-
-fit_section_end() {
-    local width="$1"
-    say "${CYAN}${BOLD}└$(repeat_char "─" "$width")┘${RESET}"
 }
 info() { say "${CYAN}ℹ${RESET}  $*"; }
 ok() { say "${GREEN}✔${RESET}  $*"; }
@@ -129,17 +119,12 @@ system_summary() {
     local line3="  Kernel       : $(uname -r 2>/dev/null || echo unknown)"
     local line4="  Architecture : $(uname -m 2>/dev/null || echo unknown)"
 
-    local width=${#line1}
-    (( ${#line2} > width )) && width=${#line2}
-    (( ${#line3} > width )) && width=${#line3}
-    (( ${#line4} > width )) && width=${#line4}
-
-    fit_section "System" "$width"
+    section "System"
     say "  ${GRAY}$(printf '%-12s' 'OS')${RESET} : ${pretty}"
     say "  ${GRAY}$(printf '%-12s' 'Hostname')${RESET} : $(hostname 2>/dev/null || echo unknown)"
     say "  ${GRAY}$(printf '%-12s' 'Kernel')${RESET} : $(uname -r 2>/dev/null || echo unknown)"
     say "  ${GRAY}$(printf '%-12s' 'Architecture')${RESET} : $(uname -m 2>/dev/null || echo unknown)"
-    fit_section_end "$width"
+    section_end
     echo
 }
 
@@ -487,18 +472,11 @@ show_menu() {
     banner
     system_summary
 
-    local line1="  1) Install / update MOTD"
-    local line2="  2) Uninstall / restore MOTD"
-    local line3="  0) Exit"
-    local width=${#line1}
-    (( ${#line2} > width )) && width=${#line2}
-    (( ${#line3} > width )) && width=${#line3}
-
-    fit_section "Main menu" "$width"
+    section "Main menu"
     say "  ${YELLOW}1)${RESET} Install / update MOTD"
     say "  ${YELLOW}2)${RESET} Uninstall / restore MOTD"
     say "  ${YELLOW}0)${RESET} Exit"
-    fit_section_end "$width"
+    section_end
     echo
     local choice
     read -r -p "Select an option [0-2]: " choice
