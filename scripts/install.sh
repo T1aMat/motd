@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_VERSION="3.1.0"
+SCRIPT_VERSION="3.1.1"
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/install.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
@@ -17,6 +17,7 @@ ETC_MOTD_BACKUP="${STATE_DIR}/etc-motd.backup"
 ETC_MOTD_STATE="${STATE_DIR}/etc-motd.state"
 COLORS_STATE="${STATE_DIR}/colors.state"
 COLORS_HASH="${STATE_DIR}/colors.installed.sha256"
+LEGACY_MOTD_DIR="${STATE_DIR}/legacy-motd"
 SSHD_DROPIN="/etc/ssh/sshd_config.d/00-t1amat-motd.conf"
 SSHD_DROPIN_HASH="${STATE_DIR}/sshd-dropin.sha256"
 
@@ -700,7 +701,106 @@ prepare_install() {
 
 migrate_and_configure() {
     prepare_install
+    initial_backup
     apply_header
+}
+
+sync_motd_files() {
+    local source_dir="$1"
+    local manifest_tmp
+    local name source target previous_hash current_hash
+    local legacy_mode=0
+
+    [[ -d "$source_dir" ]] || {
+        fail "MOTD source directory does not exist: $source_dir"
+        return 1
+    }
+
+    mkdir -p "$MOTD_DIR" "$STATE_DIR"
+
+    # A manifest means this installation has a known-good baseline. Without one,
+    # this is a legacy/pre-v3.1 installation. Preserve a recovery copy of the
+    # current files before taking control of them for the first migration.
+    if [[ ! -f "$MANIFEST_FILE" ]]; then
+        legacy_mode=1
+        if [[ ! -d "$LEGACY_MOTD_DIR" ]]; then
+            mkdir -p "$LEGACY_MOTD_DIR"
+            find "$MOTD_DIR" -maxdepth 1 -type f \
+                ! -name colors.txt \
+                -exec cp -a {} "$LEGACY_MOTD_DIR"/ \;
+            if find "$LEGACY_MOTD_DIR" -maxdepth 1 -type f -print -quit | grep -q .; then
+                info "Legacy MOTD detected; recovery copies saved in $LEGACY_MOTD_DIR."
+            fi
+        fi
+    fi
+
+    manifest_tmp="${MANIFEST_FILE}.tmp"
+    : > "$manifest_tmp"
+
+    while IFS= read -r -d '' source; do
+        name="${source##*/}"
+        target="$MOTD_DIR/$name"
+
+        # colors.txt is a user-owned configuration file. Never overwrite an
+        # existing customized copy; install it only when it is missing.
+        if [[ "$name" == "colors.txt" && -f "$target" ]]; then
+            continue
+        fi
+
+        previous_hash=""
+        if [[ -f "$MANIFEST_FILE" ]]; then
+            previous_hash="$(manifest_hash "$name" || true)"
+        fi
+
+        current_hash=""
+        if [[ -f "$target" ]]; then
+            current_hash="$(sha256sum "$target" | awk '{print $1}')"
+        fi
+
+        if [[ -f "$target" ]]; then
+            if [[ -n "$previous_hash" && "$current_hash" != "$previous_hash" ]]; then
+                warn "Preserving modified MOTD file: $name"
+                continue
+            fi
+
+            if [[ "$current_hash" == "$(sha256sum "$source" | awk '{print $1}')" ]]; then
+                printf '%s %s\n' "$current_hash" "$name" >> "$manifest_tmp"
+                continue
+            fi
+        fi
+
+        if (( legacy_mode )) && [[ -f "$target" ]]; then
+            warn "Updating legacy MOTD file: $name (recovery copy saved)"
+        else
+            ok "Installing $name"
+        fi
+
+        cp -a "$source" "$target"
+
+        if [[ "$name" =~ ^[0-9]+- ]]; then
+            chmod 0755 "$target"
+        else
+            chmod 0644 "$target"
+        fi
+
+        current_hash="$(sha256sum "$target" | awk '{print $1}')"
+
+        if [[ "$name" == "colors.txt" ]] && [[ "$(cat "$COLORS_STATE" 2>/dev/null || true)" == "absent" ]]; then
+            printf '%s\n' "$current_hash" > "$COLORS_HASH"
+        fi
+
+        printf '%s %s\n' "$current_hash" "$name" >> "$manifest_tmp"
+    done < <(find "$source_dir" -maxdepth 1 -type f -print0 | sort -z)
+
+    if [[ ! -s "$manifest_tmp" ]]; then
+        rm -f "$manifest_tmp"
+        fail "No MOTD files were synchronized."
+        return 1
+    fi
+
+    mv -f "$manifest_tmp" "$MANIFEST_FILE"
+    chmod 0644 "$MANIFEST_FILE"
+
 }
 
 download_source() {
@@ -920,6 +1020,7 @@ check_installation() {
         ok "Installation manifest exists."
     else
         warn "Installation manifest is missing."
+        info "Run Install / update to create the v3.1 management state."
         problems=$((problems + 1))
     fi
 
@@ -933,27 +1034,47 @@ check_installation() {
 }
 
 show_menu() {
-    banner
-    detect_os
-    system_summary
+    while true; do
+        banner
+        detect_os
+        system_summary
 
-    section "Main menu"
-    say "  ${YELLOW}1)${RESET} Install / update MOTD"
-    say "  ${YELLOW}2)${RESET} Uninstall / restore MOTD"
-    say "  ${YELLOW}3)${RESET} Check installation"
-    say "  ${YELLOW}0)${RESET} Exit"
-    section_end
-    echo
+        section "Main menu"
+        say "  ${YELLOW}1)${RESET} Install / update MOTD"
+        say "  ${YELLOW}2)${RESET} Uninstall / restore MOTD"
+        say "  ${YELLOW}3)${RESET} Check installation"
+        say "  ${YELLOW}0)${RESET} Exit"
+        section_end
+        echo
 
-    local choice
-    read -r -p 'Select an option [0-3]: ' choice < /dev/tty
-    case "$choice" in
-        1) install_motd ;;
-        2) uninstall_motd ;;
-        3) check_installation ;;
-        0) info "Goodbye." ;;
-        *) warn "Invalid choice."; show_menu ;;
-    esac
+        local choice
+        read -r -p 'Select an option [0-3]: ' choice < /dev/tty
+
+        case "$choice" in
+            1)
+                install_motd
+                ;;
+            2)
+                uninstall_motd
+                ;;
+            3)
+                check_installation
+                ;;
+            0)
+                echo
+                ok "Goodbye."
+                return 0
+                ;;
+            *)
+                warn "Invalid choice."
+                ;;
+        esac
+
+        echo
+        if [[ -r /dev/tty ]]; then
+            read -r -p 'Press Enter to return to the main menu...' _ < /dev/tty
+        fi
+    done
 }
 
 main() {
