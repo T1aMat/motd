@@ -6,13 +6,8 @@ Custom MOTD scripts based off of PlexMOTD. This is running on Ubuntu or Debian, 
 
 ## Installation
 1. Run the motd install script: 
- - For Ubuntu:
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/ubuntu.sh)
-```
-- For Debian:
-```
-bash <(curl -Ls https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/debian.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/install.sh)
 ```
 
 2. Change `/etc/update-motd.d/colors.txt` to your liking.
