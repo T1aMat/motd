@@ -1,7 +1,24 @@
 #!/bin/bash
 set -euo pipefail
+set -E
+shopt -s extglob
 
-SCRIPT_VERSION="3.1.1"
+# Character counting below needs a UTF-8 locale (box-drawing and status icons).
+if locale -a 2>/dev/null | grep -qiE '^C\.UTF-?8$'; then
+    export LC_ALL=C.UTF-8
+elif locale -a 2>/dev/null | grep -qiE '^en_US\.UTF-?8$'; then
+    export LC_ALL=en_US.UTF-8
+fi
+
+# Never die silently: report the failing line and command, then exit.
+on_error() {
+    local rc="$1" line="$2" cmd="$3"
+    [[ "${BASHPID:-$$}" == "$$" ]] || return 0
+    printf '\n\033[1;31m✖\033[0m  Unexpected error (exit %s) at line %s:\n   %s\n' "$rc" "$line" "$cmd" >&2
+}
+trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
+SCRIPT_VERSION="3.1.2"
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/install.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
@@ -50,7 +67,20 @@ if [[ ! -t 1 ]]; then
     RESET=''; BOLD=''; GREEN=''; CYAN=''; YELLOW=''; RED=''; WHITE=''; GRAY=''
 fi
 
-say() { printf '%b\n' "$*"; }
+BOX_OPEN=0
+BOX_INNER=$((UI_WIDTH - 2))   # visible columns between "│ " and " │"
+BOX_END=$'\n'
+VLEN=0
+
+# Visible width of a string: colour codes count 0, status icons count 1.
+visible_len() {
+    local s="$1" icon
+    s="${s//$'\e'\[*([0-9;])m/}"
+    for icon in ✔ ✖ ⚠ ℹ ▲ ▼ •; do
+        s="${s//"$icon"/x}"
+    done
+    VLEN=${#s}
+}
 
 repeat_char() {
     local char="$1"
@@ -73,9 +103,103 @@ center_text() {
     printf '%*s%s%*s' "$left" '' "$text" "$right" ''
 }
 
+# One finished line inside a box: "│ text<padding> │".
+box_row() {
+    local text="$1" pad
+    visible_len "$text"
+    pad=$(( BOX_INNER - VLEN ))
+    (( pad < 0 )) && pad=0
+    printf '%b│%b %s%b%*s %b│%b%s' \
+        "${CYAN}${BOLD}" "$RESET" "$text" "$RESET" "$pad" '' "${CYAN}${BOLD}" "$RESET" "$BOX_END"
+}
+
+# Put text in the box; anything wider than the box is word-wrapped with a
+# hanging indent so it never crosses the right border.
+box_put() {
+    local text="$1"
+    visible_len "$text"
+    if (( VLEN <= BOX_INNER )); then
+        box_row "$text"
+        return 0
+    fi
+
+    local lead body plain hang=0 cont line llen=0 word wlen avail has_text=0 first_word=1
+    local -a words=()
+    lead="${text%%[! ]*}"
+    body="${text#"$lead"}"
+    plain="${body//$'\e'\[*([0-9;])m/}"
+    case "$plain" in
+        "✔  "*|"✖  "*|"⚠  "*|"ℹ  "*) hang=3 ;;
+    esac
+    printf -v cont '%*s' $(( ${#lead} + hang )) ''
+    IFS=' ' read -r -a words <<< "$body" || true
+
+    line="$lead"
+    llen=${#lead}
+    for word in "${words[@]}"; do
+        visible_len "$word"
+        wlen=$VLEN
+        if (( first_word && hang )); then
+            line+="$word  "
+            llen=$(( llen + wlen + 2 ))
+            first_word=0
+            continue
+        fi
+        first_word=0
+        if (( has_text && llen + 1 + wlen > BOX_INNER )); then
+            box_row "$line"
+            line="$cont"
+            llen=${#cont}
+            has_text=0
+        fi
+        if (( llen + wlen > BOX_INNER )); then
+            # a single token longer than a whole line (long path/URL): hard split
+            word="${word//$'\e'\[*([0-9;])m/}"
+            while (( llen + ${#word} > BOX_INNER )); do
+                avail=$(( BOX_INNER - llen ))
+                box_row "${line}${word:0:avail}"
+                word="${word:avail}"
+                line="$cont"
+                llen=${#cont}
+            done
+            wlen=${#word}
+        fi
+        if (( has_text )); then
+            line+=" "
+            llen=$(( llen + 1 ))
+        fi
+        line+="$word"
+        llen=$(( llen + wlen ))
+        has_text=1
+    done
+    box_row "$line"
+}
+
+put_line() {
+    if (( BOX_OPEN )); then
+        box_put "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+say() {
+    local t l
+    printf -v t '%b' "$*"
+    t="${t//$'\r'/}"
+    if (( BOX_OPEN )); then
+        while IFS= read -r l || [[ -n "$l" ]]; do
+            box_put "$l"
+        done <<< "$t"
+    else
+        printf '%s\n' "$t"
+    fi
+}
+
 banner() {
     local title="T1aMat MOTD"
     local subtitle="Universal installer v${SCRIPT_VERSION}"
+    BOX_OPEN=0
     clear 2>/dev/null || true
     say "${CYAN}${BOLD}╔$(repeat_char '═' "$UI_WIDTH")╗${RESET}"
     say "${CYAN}${BOLD}║${WHITE}$(center_text "$title")${CYAN}${BOLD}║${RESET}"
@@ -91,54 +215,87 @@ section() {
     local r=$((d - l))
     (( l < 0 )) && l=0
     (( r < 0 )) && r=0
+    BOX_OPEN=0
     say "${CYAN}${BOLD}┌$(repeat_char '─' "$l") ${title} $(repeat_char '─' "$r")┐${RESET}"
+    BOX_OPEN=1
 }
 
-section_end() { say "${CYAN}${BOLD}└$(repeat_char '─' "$UI_WIDTH")┘${RESET}"; }
+section_end() {
+    BOX_OPEN=0
+    say "${CYAN}${BOLD}└$(repeat_char '─' "$UI_WIDTH")┘${RESET}"
+}
+
 info() { say "${CYAN}ℹ${RESET}  $*"; }
 ok() { say "${GREEN}✔${RESET}  $*"; }
 warn() { say "${YELLOW}⚠${RESET}  $*"; }
 fail() { say "${RED}✖${RESET}  $*"; }
 
+# A "label ........ [state]" row; BOX_END='' draws it without a newline (spinner).
+step_row() {
+    local label="$1" state="$2" content
+    printf -v content '  %-38s [%s]' "$label" "$state"
+    if (( BOX_OPEN )); then
+        box_row "$content"
+    else
+        printf '%s%s' "$content" "$BOX_END"
+    fi
+}
+
 run_step() {
     local label="$1"
     shift
-    local log pid spinner=$'|/-\\' i=0
+    local log pid rc=0 i=0 frames=$'|/-\\' mark_ok mark_fail line n=0
+    printf -v mark_ok '%b✔%b' "$GREEN" "$RESET"
+    printf -v mark_fail '%b✖%b' "$RED" "$RESET"
     log="$(mktemp)"
 
-    if [[ ! -t 1 ]]; then
-        printf '  %-42s ' "$label"
-        if "$@" >"$log" 2>&1; then
-            printf '%b✔%b\n' "$GREEN" "$RESET"
-            rm -f "$log"
-            return 0
-        fi
-        printf '%b✖%b\n' "$RED" "$RESET"
-        sed -n '1,25p' "$log"
-        rm -f "$log"
-        return 1
+    if [[ -t 1 ]]; then
+        "$@" >"$log" 2>&1 &
+        pid=$!
+        BOX_END=''
+        step_row "$label" "${frames:0:1}"
+        while kill -0 "$pid" 2>/dev/null; do
+            sleep 0.12
+            i=$((i + 1))
+            printf '\r'
+            step_row "$label" "${frames:i%4:1}"
+        done
+        wait "$pid" || rc=$?
+        printf '\r'
+        BOX_END=$'\n'
+    else
+        "$@" >"$log" 2>&1 || rc=$?
     fi
 
-    printf '  %-42s [%c]' "$label" "${spinner:0:1}"
-    "$@" >"$log" 2>&1 &
-    pid=$!
-
-    while kill -0 "$pid" 2>/dev/null; do
-        sleep 0.12
-        i=$((i + 1))
-        printf '\r  %-42s [%c]' "$label" "${spinner:i%4:1}"
-    done
-
-    if wait "$pid"; then
-        printf '\r  %-42s [%b✔%b]\n' "$label" "$GREEN" "$RESET"
+    if (( rc == 0 )); then
+        step_row "$label" "$mark_ok"
         rm -f "$log"
         return 0
     fi
 
-    printf '\r  %-42s [%b✖%b]\n' "$label" "$RED" "$RESET"
-    sed -n '1,25p' "$log"
+    step_row "$label" "$mark_fail"
+    while IFS= read -r line && (( n < 8 )); do
+        line="${line//$'\r'/}"
+        line="${line//$'\e'\[*([0-9;])[A-Za-z]/}"
+        put_line "  $line"
+        n=$((n + 1))
+    done < "$log"
     rm -f "$log"
     return 1
+}
+
+# Prompt on its own row inside the box; the cursor sits inside the borders.
+box_prompt() {
+    local __var="$1" text="  $2" reply=""
+    if (( BOX_OPEN )) && [[ -t 1 ]]; then
+        box_put "$text"
+        visible_len "$text"
+        printf '\033[1A\r\033[%dC' $(( VLEN + 2 ))
+        IFS= read -r reply < /dev/tty || reply=""
+    else
+        IFS= read -r -p "$text" reply < /dev/tty || reply=""
+    fi
+    printf -v "$__var" '%s' "$reply"
 }
 
 confirm() {
@@ -415,7 +572,7 @@ apply_header() {
     else
         say "  ${GRAY}Current header:${RESET} ${WHITE}${current}${RESET}"
         if [[ -r /dev/tty ]]; then
-            read -r -p "  New header [Enter = keep ${current}]: " header < /dev/tty
+            box_prompt header "New header [Enter = keep]: "
         else
             header="$current"
         fi
@@ -424,7 +581,12 @@ apply_header() {
 
     local q
     printf -v q '%q' "$header"
-    sed -i "s/^MOTD_HEADER=.*/MOTD_HEADER=$q/" "$CONFIG_FILE"
+    # ENVIRON keeps backslashes, "&" and "/" literal (sed's replacement would not).
+    local tmp_conf="${CONFIG_FILE}.tmp"
+    Q="$q" awk '/^MOTD_HEADER=/ { print "MOTD_HEADER=" ENVIRON["Q"]; next } { print }' \
+        "$CONFIG_FILE" > "$tmp_conf"
+    cat "$tmp_conf" > "$CONFIG_FILE"
+    rm -f "$tmp_conf"
     ok "Header: $header"
 }
 
@@ -515,6 +677,33 @@ restore_etc_motd() {
     rm -f "$ETC_MOTD_BACKUP" "$ETC_MOTD_STATE"
 }
 
+SSHD_EFFECTIVE="unknown"
+SSHD_QUERY_ERR=""
+
+# Sets SSHD_EFFECTIVE (yes/no/unknown) and SSHD_QUERY_ERR. Never fails: with
+# "set -e -o pipefail" a failing "sshd -T | awk" used to kill the installer silently.
+sshd_query_printlastlog() {
+    local out="" rc=0 value=""
+    SSHD_EFFECTIVE="unknown"
+    SSHD_QUERY_ERR=""
+
+    out="$(sshd -T 2>&1)" || rc=$?
+    out="${out//$'\r'/}"
+    if (( rc != 0 )); then
+        SSHD_QUERY_ERR="${out%%$'\n'*}"
+        rc=0
+        out="$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>&1)" || rc=$?
+        out="${out//$'\r'/}"
+        if (( rc != 0 )); then
+            return 0
+        fi
+    fi
+
+    value="$(awk 'tolower($1)=="printlastlog" {print tolower($2); exit}' <<< "$out")" || value=""
+    SSHD_EFFECTIVE="${value:-unknown}"
+    return 0
+}
+
 ensure_sshd_include() {
     local main="$1"
     grep -Eiq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf[[:space:]]*$' "$main"
@@ -550,23 +739,31 @@ configure_printlastlog() {
 PrintLastLog no
 EOF_DROPIN
 
-    if ! sshd -t; then
+    local verr=""
+    if ! verr="$(sshd -t 2>&1)"; then
         rm -f "$SSHD_DROPIN"
         fail "sshd configuration validation failed; drop-in removed."
+        say "  ${GRAY}${verr%%$'\n'*}${RESET}"
         section_end
         return 1
     fi
 
     sha256sum "$SSHD_DROPIN" > "$SSHD_DROPIN_HASH"
 
-    local effective
-    effective="$(sshd -T 2>/dev/null | awk 'tolower($1)=="printlastlog" {print tolower($2); exit}')"
-    if [[ "$effective" != "no" ]]; then
-        warn "PrintLastLog is still $effective after installing the drop-in."
-        info "An earlier sshd setting is taking precedence."
-    else
-        ok "PrintLastLog disabled through sshd drop-in."
-    fi
+    sshd_query_printlastlog
+    case "$SSHD_EFFECTIVE" in
+        no)
+            ok "PrintLastLog disabled through sshd drop-in."
+            ;;
+        unknown)
+            warn "Could not verify the effective sshd setting."
+            [[ -n "$SSHD_QUERY_ERR" ]] && say "  ${GRAY}${SSHD_QUERY_ERR}${RESET}"
+            ;;
+        *)
+            warn "PrintLastLog is still ${SSHD_EFFECTIVE} after installing the drop-in."
+            info "An earlier sshd setting is taking precedence."
+            ;;
+    esac
 
     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
         ok "SSH configuration reloaded."
@@ -709,7 +906,7 @@ sync_motd_files() {
     local source_dir="$1"
     local manifest_tmp
     local name source target previous_hash current_hash
-    local legacy_mode=0
+    local installed=0 unchanged=0
 
     [[ -d "$source_dir" ]] || {
         fail "MOTD source directory does not exist: $source_dir"
@@ -722,14 +919,15 @@ sync_motd_files() {
     # this is a legacy/pre-v3.1 installation. Preserve a recovery copy of the
     # current files before taking control of them for the first migration.
     if [[ ! -f "$MANIFEST_FILE" ]]; then
-        legacy_mode=1
         if [[ ! -d "$LEGACY_MOTD_DIR" ]]; then
             mkdir -p "$LEGACY_MOTD_DIR"
             find "$MOTD_DIR" -maxdepth 1 -type f \
                 ! -name colors.txt \
                 -exec cp -a {} "$LEGACY_MOTD_DIR"/ \;
             if find "$LEGACY_MOTD_DIR" -maxdepth 1 -type f -print -quit | grep -q .; then
-                info "Legacy MOTD detected; recovery copies saved in $LEGACY_MOTD_DIR."
+                info "Previous install detected; migrating."
+                say "  ${GRAY}Recovery copies saved in:${RESET}"
+                say "  $LEGACY_MOTD_DIR"
             fi
         fi
     fi
@@ -765,16 +963,12 @@ sync_motd_files() {
 
             if [[ "$current_hash" == "$(sha256sum "$source" | awk '{print $1}')" ]]; then
                 printf '%s %s\n' "$current_hash" "$name" >> "$manifest_tmp"
+                unchanged=$((unchanged + 1))
                 continue
             fi
         fi
 
-        if (( legacy_mode )) && [[ -f "$target" ]]; then
-            warn "Updating legacy MOTD file: $name (recovery copy saved)"
-        else
-            ok "Installing $name"
-        fi
-
+        installed=$((installed + 1))
         cp -a "$source" "$target"
 
         if [[ "$name" =~ ^[0-9]+- ]]; then
@@ -800,6 +994,7 @@ sync_motd_files() {
 
     mv -f "$manifest_tmp" "$MANIFEST_FILE"
     chmod 0644 "$MANIFEST_FILE"
+    ok "Files: ${installed} installed, ${unchanged} unchanged"
 
 }
 
@@ -808,18 +1003,14 @@ download_source() {
     local archive="$2"
 
     section "Downloading MOTD"
-    printf '  %bGitHub%b ' "$WHITE" "$RESET"
-
-    if ! curl --fail --location --progress-bar --show-error \
+    if ! run_step "Downloading MOTD archive" curl --fail --location --silent --show-error \
         --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2 \
         -o "$archive" "$REPO_URL"; then
-        echo
         fail "Download failed. Check DNS, Internet connectivity and GitHub access."
         section_end
         return 1
     fi
 
-    echo
     if [[ ! -s "$archive" ]]; then
         fail "Downloaded archive is empty."
         section_end
@@ -884,7 +1075,6 @@ install_motd() {
     echo
     section "Installing MOTD"
     sync_motd_files "$TEMP_DIR/motd"
-    ok "MOTD files synchronized."
     if (( USE_ETC_MOTD_LINK )); then
         install_etc_motd
         ok "/etc/motd linked to /var/run/motd for ${OS_FLAVOR}."
@@ -892,7 +1082,7 @@ install_motd() {
     section_end
 
     echo
-    configure_printlastlog
+    configure_printlastlog || warn "SSH step failed; the MOTD itself is installed."
 
     cleanup_temp
     TEMP_DIR=""
@@ -903,7 +1093,7 @@ install_motd() {
     say "  ${GRAY}OS profile   :${RESET} $OS_FLAVOR"
     say "  ${GRAY}Config       :${RESET} $CONFIG_FILE"
     say "  ${GRAY}Original MOTD:${RESET} $OLD_MOTD_DIR"
-    echo
+    say ""
     say "${GREEN}${BOLD}Enjoy your new MOTD.${RESET}"
     section_end
 }
@@ -942,17 +1132,20 @@ uninstall_motd() {
     echo
     restore_motd
     echo
+    section "Restoring settings"
     restore_colors
+    restore_sshd_dropin
+    info "Colour and SSH settings checked."
+    section_end
     echo
     restore_etc_motd
-    echo
-    restore_sshd_dropin
     echo
     handle_config_uninstall
 
     rm -f "$MANIFEST_FILE"
     rmdir "$STATE_DIR" 2>/dev/null || true
 
+    echo
     section "Complete"
     ok "T1aMat MOTD has been uninstalled."
     section_end
@@ -996,11 +1189,15 @@ check_installation() {
     fi
 
     if [[ -f "$SSHD_DROPIN" ]] && grep -q 'Managed by T1aMat MOTD' "$SSHD_DROPIN" && command -v sshd >/dev/null 2>&1; then
-        effective="$(sshd -T 2>/dev/null | awk 'tolower($1)=="printlastlog" {print tolower($2); exit}')"
+        sshd_query_printlastlog
+        effective="$SSHD_EFFECTIVE"
         if [[ "$effective" == "no" ]]; then
             ok "SSH PrintLastLog is disabled."
+        elif [[ "$effective" == "unknown" ]]; then
+            info "Could not query effective sshd settings."
+            [[ -n "$SSHD_QUERY_ERR" ]] && say "  ${GRAY}${SSHD_QUERY_ERR}${RESET}"
         else
-            warn "SSH PrintLastLog effective value: ${effective:-unknown}"
+            warn "SSH PrintLastLog effective value: ${effective}"
             problems=$((problems + 1))
         fi
     else
@@ -1024,7 +1221,7 @@ check_installation() {
         problems=$((problems + 1))
     fi
 
-    echo
+    say ""
     if (( problems == 0 )); then
         ok "Installation check passed."
     else
