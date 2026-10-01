@@ -1,14 +1,32 @@
 #!/usr/bin/env bash
 
-source /etc/update-motd.d/colors.txt
+COLORS_FILE="${MOTD_COLORS_FILE:-/etc/update-motd.d/colors.txt}"
+CONFIG_FILE="${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}"
 
-if command -v docker &>/dev/null; then
-    RUNNING_CONTAINERS=$(docker ps -q | wc -l) 
-    TOTAL_CONTAINERS=$(docker ps -a -q | wc -l)
-    echo -e " Docker containers...: ${TEXT_COLOR}$RUNNING_CONTAINERS ${NC}/ ${TEXT_COLOR}$TOTAL_CONTAINERS${NC} running:${NC}"
-    if [ "$RUNNING_CONTAINERS" -gt 0 ]; then   
-      docker ps --format "   • {{.Names}}" | while read line; do printf "   %s\n" "$line"; done
-    fi
-  else    
+# shellcheck source=/dev/null
+[[ -r "$COLORS_FILE" ]] && source "$COLORS_FILE"
+# shellcheck source=/dev/null
+[[ -r "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+
+DOCKER_TIMEOUT="${DOCKER_TIMEOUT:-3}"
+
+if ! command -v docker >/dev/null 2>&1; then
     echo -e "${TITLE_COLOR} Docker..............: not installed${NC}"
-fi 
+    exit 0
+fi
+
+container_data="$(timeout "$DOCKER_TIMEOUT" docker ps -a --format '{{.Names}}\t{{.State}}' 2>/dev/null || true)"
+
+if [[ -z "$container_data" ]] && ! timeout "$DOCKER_TIMEOUT" docker info >/dev/null 2>&1; then
+    echo -e "${TITLE_COLOR} Docker containers...: unavailable${NC}"
+    exit 0
+fi
+
+total_containers="$(awk 'NF {count++} END {print count+0}' <<< "$container_data")"
+running_containers="$(awk '$2 ~ /^running/ {count++} END {print count+0}' <<< "$container_data")"
+
+echo -e " Docker containers...: ${TEXT_COLOR}${running_containers}${NC} / ${TEXT_COLOR}${total_containers}${NC} running:${NC}"
+
+if (( running_containers > 0 )); then
+    awk -F '\t' '$2 ~ /^running/ {printf "   • %s\n", $1}' <<< "$container_data"
+fi
