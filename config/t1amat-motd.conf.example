@@ -1,0 +1,22 @@
+# T1aMat MOTD configuration
+# Installed to /etc/t1amat-motd.conf on first install.
+# This file is preserved across MOTD updates.
+
+MOTD_HEADER="T1aMat"
+
+MOTD_SERVICES=(
+    ssh
+    ufw
+    docker
+    nginx
+)
+
+MOTD_DISKS=(
+    /
+)
+
+WARN_PCT=80
+CRIT_PCT=90
+SERVICES_WIDTH=78
+DOCKER_TIMEOUT=3
+SSH_LOGIN_LOOKBACK=200
