@@ -1,6 +1,15 @@
 #!/bin/bash
 
-source /etc/update-motd.d/colors.txt
+COLORS_FILE="${MOTD_COLORS_FILE:-/etc/update-motd.d/colors.txt}"
+CONFIG_FILE="${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}"
 
-echo -e ${DEFAULT_COLOR}; toilet -d /etc/update-motd.d/ -f ivrit "T1aMat"
-echo ""
+# shellcheck source=/dev/null
+[[ -r "$COLORS_FILE" ]] && source "$COLORS_FILE"
+# shellcheck source=/dev/null
+[[ -r "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+
+MOTD_HEADER="${MOTD_HEADER:-T1aMat}"
+
+printf '%b' "${DEFAULT_COLOR:-\e[0m}"
+toilet -d /etc/update-motd.d/ -f ivrit "$MOTD_HEADER"
+printf '\n'
