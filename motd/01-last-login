@@ -2,4 +2,73 @@
 
 source /etc/update-motd.d/colors.txt
 
-echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}$(last | head -1 | cut -c 1-9 | xargs)${DEFAULT_COLOR} at ${TEXT_COLOR}$(last | head -1 | cut -c 40-55 | xargs)${DEFAULT_COLOR} from ${TEXT_COLOR}$(last | head -1 | cut -c 23-39 | xargs)${NC}"
+is_raspberry_pi_os() {
+    if [[ -r /proc/device-tree/model ]] &&
+       tr -d '\0' < /proc/device-tree/model 2>/dev/null | grep -qi 'Raspberry Pi'; then
+        if [[ -f /etc/rpi-issue ]]; then
+            return 0
+        fi
+        if [[ -f /etc/os-release ]]; then
+            . /etc/os-release
+            [[ "${ID:-}" == "debian" || "${ID:-}" == "raspbian" ]] && return 0
+        fi
+    fi
+
+    return 1
+}
+
+if is_raspberry_pi_os; then
+    SSH_UNIT="ssh.service"
+
+    if ! systemctl cat "$SSH_UNIT" >/dev/null 2>&1; then
+        SSH_UNIT="sshd.service"
+    fi
+
+    login_data="$({
+        journalctl -u "$SSH_UNIT" --no-pager -q -n 100 2>/dev/null || true
+    } | awk '/Accepted/ {
+        user=$9
+        ip=$11
+        date=$1" "$2" "$3
+    }
+    END {
+        if (user != "")
+            print user "|" ip "|" date
+    }')"
+
+    IFS='|' read -r user ip login_date <<< "$login_data"
+
+    if [[ -n "${user:-}" && -n "${login_date:-}" ]]; then
+        formatted_date="$(date -d "$login_date" '+%a %b %e %H:%M' 2>/dev/null || true)"
+
+        if [[ -n "$formatted_date" ]]; then
+            echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}${user}${DEFAULT_COLOR} at ${TEXT_COLOR}${formatted_date}${DEFAULT_COLOR} from ${TEXT_COLOR}${ip}${NC}"
+            exit 0
+        fi
+    fi
+
+    echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}No SSH login recorded${NC}"
+    exit 0
+fi
+
+last_line="$(last -n 1 -w 2>/dev/null | awk '
+    $1 != "" &&
+    $1 != "wtmp" &&
+    $1 != "btmp" &&
+    $1 != "reboot" &&
+    $1 != "shutdown" &&
+    $1 != "runlevel" {
+        print
+        exit
+    }
+')"
+
+if [[ -n "$last_line" ]]; then
+    user="$(awk '{print $1}' <<< "$last_line")"
+    host="$(awk '{print $3}' <<< "$last_line")"
+    login_date="$(awk '{print $4" "$5" "$6" "$7}' <<< "$last_line")"
+
+    echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}${user}${DEFAULT_COLOR} at ${TEXT_COLOR}${login_date}${DEFAULT_COLOR} from ${TEXT_COLOR}${host}${NC}"
+else
+    echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}No login recorded${NC}"
+fi
