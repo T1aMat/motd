@@ -32,7 +32,17 @@ banner(){
   say "${CYAN}${BOLD}╚$(repeat_char '═' "$UI_WIDTH")╝${RESET}"
   echo
 }
-section(){ local title="$1" d=$((UI_WIDTH-${#1}-2)) l=$((d/2)) r=$((d-l)); ((l<0))&&l=0; ((r<0))&&r=0; say "${CYAN}${BOLD}┌$(repeat_char '─' "$l") ${title} $(repeat_char '─' "$r")┐${RESET}"; }
+section() {
+  local title="$1"
+  local d=$((UI_WIDTH - ${#title} - 2))
+  local l=$((d / 2))
+  local r=$((d - l))
+
+  ((l < 0)) && l=0
+  ((r < 0)) && r=0
+
+  say "${CYAN}${BOLD}┌$(repeat_char '''─''' "$l") ${title} $(repeat_char '''─''' "$r")┐${RESET}"
+}
 section_end(){ say "${CYAN}${BOLD}└$(repeat_char '─' "$UI_WIDTH")┘${RESET}"; }
 info(){ say "${CYAN}ℹ${RESET}  $*"; }; ok(){ say "${GREEN}✔${RESET}  $*"; }; warn(){ say "${YELLOW}⚠${RESET}  $*"; }; fail(){ say "${RED}✖${RESET}  $*"; }
 run_step(){ local label="$1"; shift; local log pid i=0 spin='|/-\\'; log="$(mktemp)"; printf '  %b%-42s%b ' "$WHITE" "$label" "$RESET"; "$@" >"$log" 2>&1 & pid=$!; while kill -0 "$pid" 2>/dev/null; do printf '\b[%c]' "${spin:i++%4:1}"; sleep 0.12; done; if wait "$pid"; then printf '\b%b✔%b\n' "$GREEN" "$RESET"; rm -f "$log"; return 0; fi; printf '\b%b✖%b\n' "$RED" "$RESET"; sed -n '1,25p' "$log"; rm -f "$log"; return 1; }
