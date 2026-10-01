@@ -1,74 +1,101 @@
 #!/bin/bash
 
-source /etc/update-motd.d/colors.txt
+COLORS_FILE="${MOTD_COLORS_FILE:-/etc/update-motd.d/colors.txt}"
+# shellcheck source=/dev/null
+[[ -r "$COLORS_FILE" ]] && source "$COLORS_FILE"
 
-is_raspberry_pi_os() {
-    if [[ -r /proc/device-tree/model ]] &&
-       tr -d '\0' < /proc/device-tree/model 2>/dev/null | grep -qi 'Raspberry Pi'; then
-        if [[ -f /etc/rpi-issue ]]; then
-            return 0
-        fi
-        if [[ -f /etc/os-release ]]; then
-            . /etc/os-release
-            [[ "${ID:-}" == "debian" || "${ID:-}" == "raspbian" ]] && return 0
-        fi
-    fi
-
-    return 1
+print_login() {
+    local user="$1" date_text="$2" host="$3"
+    echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}${user}${DEFAULT_COLOR} at ${TEXT_COLOR}${date_text}${DEFAULT_COLOR} from ${TEXT_COLOR}${host}${NC}"
 }
 
-if is_raspberry_pi_os; then
-    SSH_UNIT="ssh.service"
+print_no_login() {
+    echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}No previous SSH login recorded${NC}"
+}
 
-    if ! systemctl cat "$SSH_UNIT" >/dev/null 2>&1; then
-        SSH_UNIT="sshd.service"
-    fi
+# Prefer wtmpdb/last because they carry the remote host as well as login time.
+# Debian 13 no longer ships traditional last/lastb by default; wtmpdb is the
+# direct replacement when installed.
+lastlike_output=""
 
-    login_data="$({
-        journalctl -u "$SSH_UNIT" --no-pager -q -n 100 2>/dev/null || true
-    } | awk '/Accepted/ {
-        user=$9
-        ip=$11
-        date=$1" "$2" "$3
-    }
-    END {
-        if (user != "")
-            print user "|" ip "|" date
-    }')"
+if command -v wtmpdb >/dev/null 2>&1; then
+    lastlike_output="$(wtmpdb last -n 10 -w 2>/dev/null || true)"
+elif command -v last >/dev/null 2>&1; then
+    lastlike_output="$(last -n 10 -w 2>/dev/null || true)"
+fi
 
-    IFS='|' read -r user ip login_date <<< "$login_data"
+if [[ -n "$lastlike_output" ]]; then
+    mapfile -t entries < <(awk '
+        $1 != "" &&
+        $1 != "wtmp" &&
+        $1 != "btmp" &&
+        $1 != "reboot" &&
+        $1 != "shutdown" &&
+        $1 != "runlevel" &&
+        $0 !~ /^$/ { print }
+    ' <<< "$lastlike_output")
 
-    if [[ -n "${user:-}" && -n "${login_date:-}" ]]; then
-        formatted_date="$(date -d "$login_date" '+%a %b %e %H:%M' 2>/dev/null || true)"
+    # Entry 0 is commonly the current session. Entry 1 is the previous login.
+    if ((${#entries[@]} > 1)); then
+        line="${entries[1]}"
+        user="$(awk '{print $1}' <<< "$line")"
+        host="$(awk '{print $3}' <<< "$line")"
+        login_date="$(awk '{print $4" "$5" "$6" "$7}' <<< "$line")"
 
-        if [[ -n "$formatted_date" ]]; then
-            echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}${user}${DEFAULT_COLOR} at ${TEXT_COLOR}${formatted_date}${DEFAULT_COLOR} from ${TEXT_COLOR}${ip}${NC}"
+        if [[ -n "$user" && -n "$login_date" ]]; then
+            print_login "$user" "$login_date" "$host"
             exit 0
         fi
     fi
-
-    echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}No SSH login recorded${NC}"
-    exit 0
 fi
 
-last_line="$(last -n 1 -w 2>/dev/null | awk '
-    $1 != "" &&
-    $1 != "wtmp" &&
-    $1 != "btmp" &&
-    $1 != "reboot" &&
-    $1 != "shutdown" &&
-    $1 != "runlevel" {
-        print
-        exit
-    }
-')"
+# Journal fallback is used when no last-like database/command is available.
+# Take the second-newest successful SSH authentication so MOTD shows the
+# previous login rather than the session that is currently opening.
+if command -v journalctl >/dev/null 2>&1; then
+    lookback="200"
+    if [[ -r "${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}" ]]; then
+        # shellcheck source=/dev/null
+        source "${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}"
+        lookback="${SSH_LOGIN_LOOKBACK:-200}"
+    fi
 
-if [[ -n "$last_line" ]]; then
-    user="$(awk '{print $1}' <<< "$last_line")"
-    host="$(awk '{print $3}' <<< "$last_line")"
-    login_date="$(awk '{print $4" "$5" "$6" "$7}' <<< "$last_line")"
+    ssh_unit="ssh.service"
+    if ! systemctl cat "$ssh_unit" >/dev/null 2>&1; then
+        ssh_unit="sshd.service"
+    fi
 
-    echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}${user}${DEFAULT_COLOR} at ${TEXT_COLOR}${login_date}${DEFAULT_COLOR} from ${TEXT_COLOR}${host}${NC}"
-else
-    echo -e " ${TITLE_COLOR}Last login..........:${NC} ${TEXT_COLOR}No login recorded${NC}"
+    journal_lines="$(journalctl -u "$ssh_unit" -g 'Accepted ' -o short --no-pager -q -n "$lookback" 2>/dev/null || true)"
+
+    if [[ -n "$journal_lines" ]]; then
+        mapfile -t accepted < <(printf '%s\n' "$journal_lines")
+        if ((${#accepted[@]} > 1)); then
+            line="${accepted[${#accepted[@]}-2]}"
+            user=""
+            host=""
+            date_text="$(awk '{print $1" "$2" "$3}' <<< "$line")"
+
+            read -r user host < <(
+                awk '
+                    {
+                        for (i = 1; i <= NF; i++) {
+                            if ($i == "for" && (i + 1) <= NF) user=$(i + 1)
+                            if ($i == "from" && (i + 1) <= NF) host=$(i + 1)
+                        }
+                    }
+                    END { print user, host }
+                ' <<< "$line"
+            )
+
+            if [[ -n "$user" && -n "$host" ]]; then
+                formatted_date="$(date -d "$date_text" '+%a %b %e %H:%M' 2>/dev/null || true)"
+                if [[ -n "$formatted_date" ]]; then
+                    print_login "$user" "$formatted_date" "$host"
+                    exit 0
+                fi
+            fi
+        fi
+    fi
 fi
+
+print_no_login
