@@ -67,10 +67,10 @@ for file in \
     bash -n "$file"
 done
 
-motd/00-header >/dev/null
-motd/01-last-login >/dev/null
-motd/08-processes >/dev/null
-motd/09-services >/dev/null
-motd/10-docker >/dev/null
+bash motd/00-header >/dev/null
+bash motd/01-last-login >/dev/null
+bash motd/08-processes >/dev/null
+bash motd/09-services >/dev/null
+bash motd/10-docker >/dev/null
 
 echo 'Smoke test passed.'

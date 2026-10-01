@@ -26,6 +26,15 @@ YES_MODE=0
 DRY_RUN=0
 HEADER_OVERRIDE=""
 COMMAND=""
+TEMP_DIR=""
+
+cleanup_temp() {
+    if [[ -n "${TEMP_DIR:-}" && -d "$TEMP_DIR" ]]; then
+        rm -rf -- "$TEMP_DIR"
+    fi
+}
+
+trap cleanup_temp EXIT
 
 RESET='\033[0m'
 BOLD='\033[1m'
@@ -93,7 +102,7 @@ fail() { say "${RED}✖${RESET}  $*"; }
 run_step() {
     local label="$1"
     shift
-    local log pid spinner='|/-\\' i=0
+    local log pid spinner=$'|/-\\' i=0
     log="$(mktemp)"
 
     if [[ ! -t 1 ]]; then
@@ -235,6 +244,7 @@ is_raspberry_pi_hardware() {
 
 detect_os() {
     [[ -f /etc/os-release ]] || { fail "/etc/os-release was not found."; exit 1; }
+    # shellcheck source=/dev/null
     . /etc/os-release
 
     local id="${ID:-}" like="${ID_LIKE:-}"
@@ -256,6 +266,7 @@ detect_os() {
 }
 
 system_summary() {
+    # shellcheck source=/dev/null
     . /etc/os-release 2>/dev/null || true
     section "System"
     say "  ${GRAY}OS           :${RESET} ${PRETTY_NAME:-unknown}"
@@ -435,7 +446,7 @@ initial_backup() {
     find "$MOTD_DIR" -mindepth 1 -maxdepth 1 \
         ! -name old-motd \
         ! -name colors.txt \
-        -exec mv {} "$OLD_MOTD_DIR"/ \\;
+        -exec mv {} "$OLD_MOTD_DIR"/ \;
     ok "Original MOTD backed up to $OLD_MOTD_DIR"
 }
 
@@ -758,14 +769,12 @@ install_motd() {
     install_dependencies
     section_end
 
-    local tmp_dir archive
-    tmp_dir="$(mktemp -d)"
-    archive="${tmp_dir}/motd.tar.gz"
-
-    trap "rm -rf -- '$tmp_dir'" EXIT
+    local archive
+    TEMP_DIR="$(mktemp -d)"
+    archive="${TEMP_DIR}/motd.tar.gz"
 
     echo
-    download_source "$tmp_dir" "$archive"
+    download_source "$TEMP_DIR" "$archive"
 
     echo
     section "Configuration"
@@ -774,7 +783,7 @@ install_motd() {
 
     echo
     section "Installing MOTD"
-    sync_motd_files "$tmp_dir/motd"
+    sync_motd_files "$TEMP_DIR/motd"
     ok "MOTD files synchronized."
     if (( USE_ETC_MOTD_LINK )); then
         install_etc_motd
@@ -785,8 +794,8 @@ install_motd() {
     echo
     configure_printlastlog
 
-    rm -rf "$tmp_dir"
-    trap - EXIT
+    cleanup_temp
+    TEMP_DIR=""
 
     echo
     section "Installation complete"

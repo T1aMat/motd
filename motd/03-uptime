@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# shellcheck source=/dev/null
 source /etc/update-motd.d/colors.txt
 
 echo -e " ${TITLE_COLOR}Uptime..............:${NC} ${TEXT_COLOR}$(uptime -p | sed 's/^up.//')${NC}"

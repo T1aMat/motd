@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# shellcheck source=/dev/null
 source /etc/update-motd.d/colors.txt
 
 echo -e " ${TITLE_COLOR}Load Averages.......:${DEFAULT_COLOR} 1 min: ${TEXT_COLOR}$(cut -d' ' -f1 /proc/loadavg)${DEFAULT_COLOR} | 5 mins: ${TEXT_COLOR}$(cut -d' ' -f2 /proc/loadavg)${DEFAULT_COLOR} | 15 mins: ${TEXT_COLOR}$(cut -d' ' -f3 /proc/loadavg)${NC}"
