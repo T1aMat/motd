@@ -1,111 +1,117 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
-# Maintain proper order when adding items to services_order
-declare -A services
-declare -a services_order
+COLORS_FILE="${MOTD_COLORS_FILE:-/etc/update-motd.d/colors.txt}"
+CONFIG_FILE="${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}"
 
-services["marzban"]="Marzban"
-services_order+=("marzban")
+# shellcheck source=/dev/null
+[[ -r "$COLORS_FILE" ]] && source "$COLORS_FILE"
+# shellcheck source=/dev/null
+[[ -r "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
-services["caddy"]="Caddy"
-services_order+=("caddy")
+if ! declare -p MOTD_SERVICES >/dev/null 2>&1; then
+    MOTD_SERVICES=(ssh ufw docker nginx)
+fi
+SERVICES_WIDTH="${SERVICES_WIDTH:-78}"
 
-services["vnstat"]="vnStat"
-services_order+=("vnstat")
+GREEN_COLOR="${GREEN_COLOR:-${CO:-\e[32m}}"
+RED_COLOR="${RED_COLOR:-${CE:-\e[31m}}"
+NC_COLOR="${NC_COLOR:-${CN:-\e[0m}}"
 
-services["ufw"]="UFW"
-services_order+=("ufw")
-
-services["docker"]="Docker"
-services_order+=("docker")
-
-services["nginx"]="nginx"
-services_order+=("nginx")
-
-# Colors
-CO="${CO:-\e[32m}"
-CE="${CE:-\e[31m}"
-CN="${CN:-\e[0m}"
-
-# Max width used for components in second column
-WIDTH="${WIDTH:-100}"
-
-# Prints given blocks of text side by side
-# $1 - left column
-# $2 - right column
-print_columns() {
-    [[ -z $2 ]] && return
-    paste <(echo -e "${CN}$1${1:+:}${CN}") <(echo -e "$2")
-}
-
-# Prints text as either acitve or inactive
-# $1 - text to print
-# $2 - literal "active" or "inactive"
-print_status() {
-    local out=""
-    if [[ $2 == "active" ]]; then
-        out+="${CO}▲${CN}"
-    else
-        out+="${CE}▼${CN}"
-    fi
-    out+=" $1${CN}"
-    echo "${out}"
-}
-
-# Prints comma-separated arguments wrapped to the given width
-# $1 - width to wrap to
-# $2, $3, ... - values to print
-print_wrap() {
-    local width=$1
-    shift
-    local out=""
-    local line_length=0
-    for element in "$@"; do
-        element="${element} |"
-        local visible_elelement future_length
-        visible_elelement=$(strip_ansi "${element}")
-        future_length=$((line_length + ${#visible_elelement}))
-        if [[ ${line_length} -ne 0 && ${future_length} -gt ${width} ]]; then
-            out+="\n"
-            line_length=0
-        fi
-        out+="${element} "
-        line_length=$((line_length + ${#visible_elelement}))
-    done
-    [[ -n "${out}" ]] && echo "${out::-2}"
-}
-
-# Strips ANSI color codes from given string
-# $1 - text to strip
 strip_ansi() {
-    echo -e "$1" | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]//g"
+    printf '%b\n' "$1" | sed -r 's/\x1B\[[0-9;?]*[ -\/]*[@-~]//g'
+}
+
+service_label() {
+    case "$1" in
+        ssh|sshd) echo "SSH" ;;
+        ufw) echo "UFW" ;;
+        docker) echo "Docker" ;;
+        nginx) echo "nginx" ;;
+        caddy) echo "Caddy" ;;
+        vnstat) echo "vnStat" ;;
+        marzban) echo "Marzban" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+print_status() {
+    local label="$1"
+    local state="$2"
+
+    if [[ "$state" == "active" ]]; then
+        printf '%b▲%b %s - active' "$GREEN_COLOR" "$NC_COLOR" "$label"
+    else
+        printf '%b▼%b %s - inactive' "$RED_COLOR" "$NC_COLOR" "$label"
+    fi
+}
+
+get_status() {
+    local service="$1"
+
+    if [[ "$service" == *.service ]]; then
+        service="${service%.service}"
+    fi
+
+    if [[ "$service" == "ufw" ]] && command -v ufw >/dev/null 2>&1; then
+        if timeout 2 ufw status 2>/dev/null | grep -q '^Status: active'; then
+            echo active
+        else
+            echo inactive
+        fi
+        return 0
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    if ! systemctl cat "${service}.service" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    systemctl show -p ActiveState --value "${service}.service" 2>/dev/null || return 1
 }
 
 statuses=()
-for key in "${services_order[@]}"; do
-    if [ $key = "ufw" ] && command -v ufw 2>&1 >/dev/null; then
-        if sudo ufw status | grep -q "Status: active"; then
-            statuses+=("$(print_status "${services[${key}]} - active" "active")")
-        else
-            statuses+=("$(print_status "${services[${key}]} - inactive" "inactive")")
-        fi
-    elif [ $key = "marzban" ] && command -v marzban 2>&1 >/dev/null; then
-        if sudo marzban status | ansi2txt |grep -q "marzban: running"; then
-            statuses+=("$(print_status "${services[${key}]}" "active")")
-        else
-            statuses+=("$(print_status "${services[${key}]}" "inactive")")
-        fi
+for service in "${MOTD_SERVICES[@]}"; do
+    [[ -n "$service" ]] || continue
+    state="$(get_status "$service" || true)"
+    [[ "$state" == "active" || "$state" == "inactive" ]] || continue
+    label="$(service_label "$service")"
+    statuses+=("$(print_status "$label" "$state")")
+done
+
+((${#statuses[@]} > 0)) || exit 0
+
+prefix=" Services............:"
+prefix_visible="$(strip_ansi "$prefix")"
+prefix_len=${#prefix_visible}
+continuation="$(printf '%*s' "$((prefix_len + 1))" '')"
+
+line="$prefix"
+line_len=$prefix_len
+first=1
+for status in "${statuses[@]}"; do
+    visible="$(strip_ansi "$status")"
+    if (( first )); then
+        candidate_len=$((line_len + 1 + ${#visible}))
+        first=0
     else
-        if [[ $(systemctl list-unit-files "${key}*" | wc -l) -gt 3 ]]; then
-            status=$(systemctl show -p ActiveState --value "${key}")
-            statuses+=("$(print_status "${services[${key}]}" "${status}")")
-        fi
+        candidate_len=$((line_len + 3 + ${#visible}))
+    fi
+
+    if [[ "$first" -eq 0 && $candidate_len -gt $SERVICES_WIDTH ]]; then
+        printf '%b\n' "$line"
+        line="${continuation}${status}"
+        line_len=$((prefix_len + 1 + ${#visible}))
+    elif [[ "$line" == "$prefix" ]]; then
+        line="${prefix} ${status}"
+        line_len=$candidate_len
+    else
+        line="${line} | ${status}"
+        line_len=$candidate_len
     fi
 done
 
-text="\b"
-text+=$(print_wrap "${WIDTH}" "${statuses[@]}")
-
-print_columns " Services............" "${text}"
+printf '%b\n' "$line"
