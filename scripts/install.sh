@@ -186,17 +186,16 @@ center_text() {
     printf '%*s%b%*s' "$left" '' "$text" "$right" ''
 }
 
-# Top border of a panel. Title is clipped so the line is always UI_WIDTH+2 wide.
+# Top border + title on its own row (avoids glyph collisions with ─).
 section() {
     local title="$1"
     local centered
-
     centered="$(center_text "$title" "$UI_WIDTH")"
-
     say "${CYAN}${BOLD}┌$(repeat_char '─' "$UI_WIDTH")┐${RESET}"
     say "${CYAN}${BOLD}${centered}${RESET}"
 }
 
+# Blank line before bottom border so glyphs never touch the ─ line.
 section_end() {
     say ""
     say "${CYAN}${BOLD}└$(repeat_char '─' "$UI_WIDTH")┘${RESET}"
@@ -207,12 +206,9 @@ section_end() {
 panel_line() {
     local text="${1:-}"
     local plain len max="$UI_WIDTH"
-
     # shellcheck disable=SC2001
     plain="$(printf '%b' "$text" | sed 's/\x1B\[[0-9;?]*[ -/]*[@-~]//g')"
-
     len=${#plain}
-
     if (( len > max )); then
         say "  ${plain:0:max-1}…"
     else
@@ -220,6 +216,10 @@ panel_line() {
     fi
 }
 
+# Optional visual separator between content groups (not required before section_end).
+panel_blank() {
+    say ""
+}
 
 # Consistent menu entry: yellow number, clipped label.
 # Usage: menu_item 1 "Install / update MOTD"
@@ -753,7 +753,6 @@ configure_services() {
             if service_enabled "$service"; then mark="✓"; else mark=" "; fi
             menu_item "$((i + 1))" "$(service_label "$service")" "$mark"
         done
-        panel_blank
         menu_item a "Add custom service"
         menu_item r "Refresh discovery"
         menu_item 0 "Done"
