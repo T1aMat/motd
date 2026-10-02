@@ -104,10 +104,10 @@ declare -A SERVICE_LABELS=(
 
 RESET='\033[0m'
 BOLD='\033[1m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
+GREEN='\033[1;32m'
+CYAN='\033[1;36m'
+YELLOW='\033[1;33m'
+RED='\033[1;31m'
 WHITE='\033[1;37m'
 GRAY='\033[0;90m'
 
@@ -131,12 +131,11 @@ cleanup_temp() {
 trap cleanup_temp EXIT
 
 say() { printf '%b\n' "$*"; }
-# Status lines: "  [ mark ] message"
-# Brackets/spaces = default; glyph = bold+color, visually centered with spaces.
-info() { printf '  [ \033[1;36mℹ\033[0m ] %b\n' "$*"; }
-ok()   { printf '  [ \033[1;32m✔\033[0m ] %b\n' "$*"; }
-warn() { printf '  [ \033[1;33m⚠\033[0m ] %b\n' "$*"; }
-fail() { printf '  [ \033[1;31m✖\033[0m ] %b\n' "$*"; }
+# Status lines: "  [mark] message" — brackets default, glyph colored via $COLOR vars.
+info() { printf '  [%bℹ%b] %b\n' "$CYAN" "$RESET" "$*"; }
+ok()   { printf '  [%b✔%b] %b\n' "$GREEN" "$RESET" "$*"; }
+warn() { printf '  [%b⚠%b] %b\n' "$YELLOW" "$RESET" "$*"; }
+fail() { printf '  [%b✖%b] %b\n' "$RED" "$RESET" "$*"; }
 
 # Strip ANSI escape sequences so length math matches what the user sees.
 visible_len() {
@@ -230,11 +229,10 @@ panel_blank() {
 menu_item() {
     local key="$1" label="$2" mark="${3-}"
     local body
-    # Bold yellow number (1;33m). Do not use $YELLOW (0;33m clears bold).
     if [[ -n "$mark" ]]; then
-        body="  [1;33m${key}.[0m [${mark}] ${label}"
+        body="  ${YELLOW}${key}.${RESET} [${mark}] ${label}"
     else
-        body="  [1;33m${key}.[0m ${label}"
+        body="  ${YELLOW}${key}.${RESET} ${label}"
     fi
     panel_line "$body"
 }
@@ -303,12 +301,12 @@ run_step() {
     wait "$pid" || rc=$?
 
     if (( rc == 0 )); then
-        printf '  [ \033[1;32m✔\033[0m ] %s\n' "$label"
+        printf '  [%b✔%b] %s\n' "$GREEN" "$RESET" "$label"
         rm -f "$log"
         return 0
     fi
 
-    printf '  [ \033[1;31m✖\033[0m ] %s\n' "$label"
+    printf '  [%b✖%b] %s\n' "$RED" "$RESET" "$label"
     sed -n '1,12p' "$log" >&2
     rm -f "$log"
     return "$rc"
