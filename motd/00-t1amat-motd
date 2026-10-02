@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -u
+
+MOTD_DIR="${MOTD_DIR:-/etc/update-motd.d}"
+CONFIG_FILE="${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}"
+
+[[ -r "$CONFIG_FILE" ]] && {
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+}
+
+MOTD_ORDER_DEFAULT=(
+    last-login
+    uptime
+    load-average
+    memory
+    disk-usage
+    logins
+    processes
+    services
+    docker
+)
+
+if ! declare -p MOTD_ORDER >/dev/null 2>&1; then
+    MOTD_ORDER=("${MOTD_ORDER_DEFAULT[@]}")
+fi
+
+module_file() {
+    case "$1" in
+        last-login) echo "$MOTD_DIR/01-last-login" ;;
+        uptime) echo "$MOTD_DIR/03-uptime" ;;
+        load-average) echo "$MOTD_DIR/04-load-average" ;;
+        memory) echo "$MOTD_DIR/05-memory" ;;
+        disk-usage) echo "$MOTD_DIR/06-disk-usage" ;;
+        logins) echo "$MOTD_DIR/07-logins" ;;
+        processes) echo "$MOTD_DIR/08-processes" ;;
+        services) echo "$MOTD_DIR/09-services" ;;
+        docker) echo "$MOTD_DIR/10-docker" ;;
+        *) echo "$MOTD_DIR/$1" ;;
+    esac
+}
+
+for module in "${MOTD_ORDER[@]}"; do
+    file="$(module_file "$module")"
+
+    [[ -f "$file" ]] || continue
+    [[ "$file" == "$MOTD_DIR/00-t1amat-motd" ]] && continue
+    [[ "$file" == "$MOTD_DIR/00-header" ]] && continue
+
+    if ! bash "$file"; then
+        # MOTD must never prevent a login because one optional module failed.
+        :
+    fi
+done
+
+exit 0
