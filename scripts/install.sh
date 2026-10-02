@@ -839,7 +839,9 @@ configure_layout() {
         esac
 
         echo
-        [[ -r /dev/tty ]] && read -r -p "Press Enter to continue..." _ < /dev/tty || true
+        if [[ -r /dev/tty ]]; then
+            read -r -p "Press Enter to continue..." _ < /dev/tty || true
+        fi
     done
 }
 
@@ -866,7 +868,9 @@ configure_motd() {
                 system_summary
                 configure_services
                 echo
-                [[ -r /dev/tty ]] && read -r -p "Press Enter to return..." _ < /dev/tty || true
+                if [[ -r /dev/tty ]]; then
+                    read -r -p "Press Enter to return..." _ < /dev/tty || true
+                fi
                 ;;
             3)
                 load_config
@@ -1402,9 +1406,12 @@ check_installation() {
     local problems=0 effective config_header
     local required=(00-header 00-t1amat-motd 01-last-login 09-services 10-docker)
 
-    [[ -f "$CONFIG_FILE" ]] &&
-        ok "Configuration file exists." ||
-        { warn "Configuration file is missing."; problems=$((problems + 1)); }
+    if [[ -f "$CONFIG_FILE" ]]; then
+        ok "Configuration file exists."
+    else
+        warn "Configuration file is missing."
+        problems=$((problems + 1))
+    fi
 
     local file
     for file in "${required[@]}"; do
@@ -1517,7 +1524,9 @@ show_menu() {
         esac
 
         echo
-        [[ -r /dev/tty ]] && read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true
+        if [[ -r /dev/tty ]]; then
+            read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true
+        fi
     done
 }
 
