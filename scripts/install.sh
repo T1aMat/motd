@@ -131,11 +131,11 @@ cleanup_temp() {
 trap cleanup_temp EXIT
 
 say() { printf '%b\n' "$*"; }
-# Status lines: always "  [mark] message" so they align with panel content.
-info() { say "  ${CYAN}[ℹ]${RESET} $*"; }
-ok()   { say "  ${GREEN}[✔]${RESET} $*"; }
-warn() { say "  ${YELLOW}[⚠]${RESET} $*"; }
-fail() { say "  ${RED}[✖]${RESET} $*"; }
+# Status lines: "  [mark] message" — brackets default, only the symbol colored.
+info() { say "  [${CYAN}ℹ${RESET}] $*"; }
+ok()   { say "  [${GREEN}✔${RESET}] $*"; }
+warn() { say "  [${YELLOW}⚠${RESET}] $*"; }
+fail() { say "  [${RED}✖${RESET}] $*"; }
 
 # Strip ANSI escape sequences so length math matches what the user sees.
 visible_len() {
@@ -280,12 +280,12 @@ run_step() {
     wait "$pid" || rc=$?
 
     if (( rc == 0 )); then
-        printf '  %b[✔]%b %s\n' "$GREEN" "$RESET" "$label"
+        printf '  [%b✔%b] %s\n' "$GREEN" "$RESET" "$label"
         rm -f "$log"
         return 0
     fi
 
-    printf '  %b[✖]%b %s\n' "$RED" "$RESET" "$label"
+    printf '  [%b✖%b] %s\n' "$RED" "$RESET" "$label"
     sed -n '1,12p' "$log" >&2
     rm -f "$log"
     return "$rc"
@@ -634,7 +634,7 @@ apply_header() {
             header="$current"
         else
             say "  ${GRAY}Current header:${RESET} ${WHITE}${current}${RESET}"
-            box_prompt header "New header [Enter = keep]: "
+            box_prompt header "  New header [Enter = keep]: "
             [[ -z "$header" ]] && header="$current"
         fi
     fi
@@ -1043,7 +1043,7 @@ sync_motd_files() {
             if [[ -n "$previous_hash" && "$current_hash" != "$previous_hash" ]]; then
                 warn "Preserving modified MOTD file: $name"
                 # Still enforce correct permissions so update-motd never runs modules twice
-                if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" || "$name" == "99-footer" ]]; then
+                if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" ]]; then
                     chmod 0755 "$target" 2>/dev/null || true
                 else
                     chmod 0644 "$target" 2>/dev/null || true
@@ -1053,7 +1053,7 @@ sync_motd_files() {
             fi
             if [[ "$current_hash" == "$(sha256sum "$source" | awk '{print $1}')" ]]; then
                 # Content matches; still force correct mode (prevents double MOTD on reinstall)
-                if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" || "$name" == "99-footer" ]]; then
+                if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" ]]; then
                     chmod 0755 "$target" 2>/dev/null || true
                 else
                     chmod 0644 "$target" 2>/dev/null || true
@@ -1066,7 +1066,7 @@ sync_motd_files() {
 
         cp -a "$source" "$target"
 
-        if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" || "$name" == "99-footer" ]]; then
+        if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" ]]; then
             chmod 0755 "$target"
         else
             chmod 0644 "$target"
@@ -1372,9 +1372,10 @@ install_motd() {
     system_summary
 
     section "Install MOTD"
-    say "  ${GRAY}Profile:${RESET} ${WHITE}${OS_FLAVOR}${RESET}"
-    say "  Existing MOTD files are preserved on update when modified."
-    say "  Configuration lives in ${CONFIG_FILE}."
+    panel_line "  ${GRAY}Profile:${RESET} ${WHITE}${OS_FLAVOR}${RESET}"
+    panel_line "  Existing MOTD files are preserved on"
+    panel_line "  update when modified."
+    panel_line "  Config: ${CONFIG_FILE}"
     section_end
     echo
 
@@ -1450,9 +1451,9 @@ install_motd() {
     echo
     section "Installation complete"
     ok "T1aMat MOTD ${SCRIPT_VERSION} installed."
-    say "  ${GRAY}OS profile   :${RESET} $OS_FLAVOR"
-    say "  ${GRAY}Config       :${RESET} $CONFIG_FILE"
-    say "  ${GRAY}Original MOTD:${RESET} $OLD_MOTD_DIR"
+    panel_line "  ${GRAY}OS profile   :${RESET} $OS_FLAVOR"
+    panel_line "  ${GRAY}Config       :${RESET} $CONFIG_FILE"
+    panel_line "  ${GRAY}Original MOTD:${RESET} $OLD_MOTD_DIR"
     section_end
 }
 
