@@ -11,5 +11,3 @@ bash <(curl -Ls https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/
 ```
 
 2. Change `/etc/update-motd.d/colors.txt` to your liking.
-3. Change services in `/etc/update-motd.d/09-services` to suit your needs.
-4. Optionally change `PrintLastLog` to `yes` in `/etc/ssh/sshd_config`.
