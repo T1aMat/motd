@@ -131,10 +131,11 @@ cleanup_temp() {
 trap cleanup_temp EXIT
 
 say() { printf '%b\n' "$*"; }
-info() { say "${CYAN}ℹ${RESET}  $*"; }
-ok() { say "${GREEN}✔${RESET}  $*"; }
-warn() { say "${YELLOW}⚠${RESET}  $*"; }
-fail() { say "${RED}✖${RESET}  $*"; }
+# Status lines: always "  [mark] message" so they align with panel content.
+info() { say "  ${CYAN}[ℹ]${RESET} $*"; }
+ok()   { say "  ${GREEN}[✔]${RESET} $*"; }
+warn() { say "  ${YELLOW}[⚠]${RESET} $*"; }
+fail() { say "  ${RED}[✖]${RESET} $*"; }
 
 # Strip ANSI escape sequences so length math matches what the user sees.
 visible_len() {
@@ -267,10 +268,8 @@ confirm() {
 run_step() {
     local label="$1"
     shift
-    local log pid rc=0 i=0 mark_ok mark_fail
+    local log pid rc=0 i=0
     log="$(mktemp)"
-    printf -v mark_ok '%b✔%b' "$GREEN" "$RESET"
-    printf -v mark_fail '%b✖%b' "$RED" "$RESET"
 
     "$@" >"$log" 2>&1 &
     pid=$!
@@ -281,12 +280,12 @@ run_step() {
     wait "$pid" || rc=$?
 
     if (( rc == 0 )); then
-        printf '  %-39s [%b]\n' "$label" "$mark_ok"
+        printf '  %b[✔]%b %s\n' "$GREEN" "$RESET" "$label"
         rm -f "$log"
         return 0
     fi
 
-    printf '  %-39s [%b]\n' "$label" "$mark_fail"
+    printf '  %b[✖]%b %s\n' "$RED" "$RESET" "$label"
     sed -n '1,12p' "$log" >&2
     rm -f "$log"
     return "$rc"
@@ -469,7 +468,7 @@ replace_config_array() {
     } > "$block"
 
     tmp="$(mktemp)"
-    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^[[:space:]]*${key}[[:space:]]*\(" "$CONFIG_FILE"; then
+    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^[[:space:]]*${key}[[:space:]]*[(]" "$CONFIG_FILE"; then
         awk -v key="$key" -v repl="$block" '
             $0 ~ "^[[:space:]]*" key "[[:space:]]*\\(" {
                 while ((getline line < repl) > 0) print line
@@ -594,7 +593,7 @@ write_default_config() {
     append_default_setting "WARN_PCT" "80"
     append_default_setting "CRIT_PCT" "90"
 
-    if ! grep -Eq '^MOTD_ORDER[[:space:]]*\\(' "$CONFIG_FILE"; then
+    if ! grep -Eq '^MOTD_ORDER[[:space:]]*[(]' "$CONFIG_FILE"; then
         {
             echo
             echo 'MOTD_ORDER=('
@@ -1044,7 +1043,7 @@ sync_motd_files() {
             if [[ -n "$previous_hash" && "$current_hash" != "$previous_hash" ]]; then
                 warn "Preserving modified MOTD file: $name"
                 # Still enforce correct permissions so update-motd never runs modules twice
-                if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" ]]; then
+                if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" || "$name" == "99-footer" ]]; then
                     chmod 0755 "$target" 2>/dev/null || true
                 else
                     chmod 0644 "$target" 2>/dev/null || true
@@ -1054,7 +1053,7 @@ sync_motd_files() {
             fi
             if [[ "$current_hash" == "$(sha256sum "$source" | awk '{print $1}')" ]]; then
                 # Content matches; still force correct mode (prevents double MOTD on reinstall)
-                if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" ]]; then
+                if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" || "$name" == "99-footer" ]]; then
                     chmod 0755 "$target" 2>/dev/null || true
                 else
                     chmod 0644 "$target" 2>/dev/null || true
@@ -1067,7 +1066,7 @@ sync_motd_files() {
 
         cp -a "$source" "$target"
 
-        if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" ]]; then
+        if [[ "$name" == "00-header" || "$name" == "00-t1amat-motd" || "$name" == "99-footer" ]]; then
             chmod 0755 "$target"
         else
             chmod 0644 "$target"
