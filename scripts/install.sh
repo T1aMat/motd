@@ -189,44 +189,37 @@ center_text() {
 # Top border of a panel. Title is clipped so the line is always UI_WIDTH+2 wide.
 section() {
     local title="$1"
-    local max_title=$(( UI_WIDTH - 4 ))
-    (( max_title < 8 )) && max_title=8
-    if (( ${#title} > max_title )); then
-        title="${title:0:max_title-1}…"
-    fi
-    local d=$(( UI_WIDTH - ${#title} - 2 ))
-    local left=$(( d / 2 ))
-    local right=$(( d - left ))
-    (( left < 0 )) && left=0
-    (( right < 0 )) && right=0
-    say "${CYAN}${BOLD}┌$(repeat_char '─' "$left") ${title} $(repeat_char '─' "$right")┐${RESET}"
+    local centered
+
+    centered="$(center_text "$title" "$UI_WIDTH")"
+
+    say "${CYAN}${BOLD}┌$(repeat_char '─' "$UI_WIDTH")┐${RESET}"
+    say "${CYAN}${BOLD}${centered}${RESET}"
 }
 
 section_end() {
+    say ""
     say "${CYAN}${BOLD}└$(repeat_char '─' "$UI_WIDTH")┘${RESET}"
 }
 
-# Content line inside a panel (no side borders).
-# Do not right-pad to UI_WIDTH — trailing spaces make many terminals
-# clip the bottom of glyphs on the next paint. Only truncate if needed.
+# Content line inside a panel.
+# Do not right-pad with spaces; only truncate when necessary.
 panel_line() {
     local text="${1:-}"
-    local plain len max=$UI_WIDTH
+    local plain len max="$UI_WIDTH"
+
     # shellcheck disable=SC2001
     plain="$(printf '%b' "$text" | sed 's/\x1B\[[0-9;?]*[ -/]*[@-~]//g')"
+
     len=${#plain}
+
     if (( len > max )); then
-        # Too long: show plain truncated text (avoids broken ANSI mid-sequence)
         say "  ${plain:0:max-1}…"
     else
         say "$text"
     fi
 }
 
-# Blank interior line.
-panel_blank() {
-    say ""
-}
 
 # Consistent menu entry: yellow number, clipped label.
 # Usage: menu_item 1 "Install / update MOTD"
