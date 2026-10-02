@@ -131,11 +131,12 @@ cleanup_temp() {
 trap cleanup_temp EXIT
 
 say() { printf '%b\n' "$*"; }
-# Status lines: "  [mark] message" — brackets default, symbol bold+colored.
-info() { say "  [${BOLD}${CYAN}ℹ${RESET}] $*"; }
-ok()   { say "  [${BOLD}${GREEN}✔${RESET}] $*"; }
-warn() { say "  [${BOLD}${YELLOW}⚠${RESET}] $*"; }
-fail() { say "  [${BOLD}${RED}✖${RESET}] $*"; }
+# Status lines: "  [ mark ] message"
+# Brackets/spaces = default; glyph = bold+color, visually centered with spaces.
+info() { printf '  [ \033[1;36mℹ\033[0m ] %b\n' "$*"; }
+ok()   { printf '  [ \033[1;32m✔\033[0m ] %b\n' "$*"; }
+warn() { printf '  [ \033[1;33m⚠\033[0m ] %b\n' "$*"; }
+fail() { printf '  [ \033[1;31m✖\033[0m ] %b\n' "$*"; }
 
 # Strip ANSI escape sequences so length math matches what the user sees.
 visible_len() {
@@ -229,10 +230,11 @@ panel_blank() {
 menu_item() {
     local key="$1" label="$2" mark="${3-}"
     local body
+    # Bold yellow number (1;33m). Do not use $YELLOW (0;33m clears bold).
     if [[ -n "$mark" ]]; then
-        body="  ${BOLD}${YELLOW}${key}.${RESET} [${mark}] ${label}"
+        body="  [1;33m${key}.[0m [${mark}] ${label}"
     else
-        body="  ${BOLD}${YELLOW}${key}.${RESET} ${label}"
+        body="  [1;33m${key}.[0m ${label}"
     fi
     panel_line "$body"
 }
@@ -301,12 +303,12 @@ run_step() {
     wait "$pid" || rc=$?
 
     if (( rc == 0 )); then
-        printf '  [%b✔%b] %s\n' "${BOLD}${GREEN}" "$RESET" "$label"
+        printf '  [ \033[1;32m✔\033[0m ] %s\n' "$label"
         rm -f "$log"
         return 0
     fi
 
-    printf '  [%b✖%b] %s\n' "${BOLD}${RED}" "$RESET" "$label"
+    printf '  [ \033[1;31m✖\033[0m ] %s\n' "$label"
     sed -n '1,12p' "$log" >&2
     rm -f "$log"
     return "$rc"
