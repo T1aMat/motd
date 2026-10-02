@@ -104,10 +104,10 @@ declare -A SERVICE_LABELS=(
 
 RESET='\033[0m'
 BOLD='\033[1m'
-GREEN='\033[1;32m'
-CYAN='\033[1;36m'
-YELLOW='\033[1;33m'
-RED='\033[1;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
 WHITE='\033[1;37m'
 GRAY='\033[0;90m'
 
@@ -132,11 +132,10 @@ trap cleanup_temp EXIT
 
 say() { printf '%b\n' "$*"; }
 # Status lines: "  [mark] message" — brackets default, only the symbol colored.
-# Use single-column ASCII symbols so terminals never clip the brackets.
-info() { say "  [${CYAN}i${RESET}] $*"; }
-ok()   { say "  [${GREEN}+${RESET}] $*"; }
-warn() { say "  [${YELLOW}!${RESET}] $*"; }
-fail() { say "  [${RED}x${RESET}] $*"; }
+info() { say "  [${CYAN}ℹ${RESET}] $*"; }
+ok()   { say "  [${GREEN}✔${RESET}] $*"; }
+warn() { say "  [${YELLOW}⚠${RESET}] $*"; }
+fail() { say "  [${RED}✖${RESET}] $*"; }
 
 # Strip ANSI escape sequences so length math matches what the user sees.
 visible_len() {
@@ -207,15 +206,26 @@ section_end() {
     say "${CYAN}${BOLD}└$(repeat_char '─' "$UI_WIDTH")┘${RESET}"
 }
 
-# Content line inside a panel: fitted to UI_WIDTH (no side borders).
+# Content line inside a panel (no side borders).
+# Do not right-pad to UI_WIDTH — trailing spaces make many terminals
+# clip the bottom of glyphs on the next paint. Only truncate if needed.
 panel_line() {
     local text="${1:-}"
-    say "$(fit_width "$text")"
+    local plain len max=$UI_WIDTH
+    # shellcheck disable=SC2001
+    plain="$(printf '%b' "$text" | sed 's/\x1B\[[0-9;?]*[ -/]*[@-~]//g')"
+    len=${#plain}
+    if (( len > max )); then
+        # Too long: show plain truncated text (avoids broken ANSI mid-sequence)
+        say "  ${plain:0:max-1}…"
+    else
+        say "$text"
+    fi
 }
 
 # Blank interior line.
 panel_blank() {
-    panel_line ""
+    say ""
 }
 
 # Consistent menu entry: yellow number, clipped label.
@@ -297,12 +307,12 @@ run_step() {
     wait "$pid" || rc=$?
 
     if (( rc == 0 )); then
-        printf '  [%b+%b] %s\n' "$GREEN" "$RESET" "$label"
+        printf '  [%b✔%b] %s\n' "$GREEN" "$RESET" "$label"
         rm -f "$log"
         return 0
     fi
 
-    printf '  [%bx%b] %s\n' "$RED" "$RESET" "$label"
+    printf '  [%b✖%b] %s\n' "$RED" "$RESET" "$label"
     sed -n '1,12p' "$log" >&2
     rm -f "$log"
     return "$rc"
@@ -747,7 +757,7 @@ configure_services() {
         section "Services / auto-discovery"
         for ((i = 0; i < ${#candidates[@]}; i++)); do
             service="${candidates[$i]}"
-            if service_enabled "$service"; then mark="+"; else mark=" "; fi
+            if service_enabled "$service"; then mark="✓"; else mark=" "; fi
             menu_item "$((i + 1))" "$(service_label "$service")" "$mark"
         done
         panel_blank
@@ -829,7 +839,7 @@ toggle_module() {
         for ((idx = 0; idx < ${#all[@]}; idx++)); do
             module="${all[$idx]}"
             if [[ -n "${enabled[$module]:-}" ]]; then
-                menu_item "$((idx + 1))" "$(module_label "$module")" "+"
+                menu_item "$((idx + 1))" "$(module_label "$module")" "✓"
             else
                 menu_item "$((idx + 1))" "$(module_label "$module")" " "
             fi
