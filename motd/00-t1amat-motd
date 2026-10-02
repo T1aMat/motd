@@ -53,4 +53,6 @@ for module in "${MOTD_ORDER[@]}"; do
     fi
 done
 
+# Always leave one blank line between the last MOTD line and the shell prompt.
+echo
 exit 0
