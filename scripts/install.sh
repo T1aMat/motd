@@ -132,10 +132,11 @@ trap cleanup_temp EXIT
 
 say() { printf '%b\n' "$*"; }
 # Status lines: "  [mark] message" — brackets default, only the symbol colored.
-info() { say "  [${CYAN}ℹ${RESET}] $*"; }
-ok()   { say "  [${GREEN}✔${RESET}] $*"; }
-warn() { say "  [${YELLOW}⚠${RESET}] $*"; }
-fail() { say "  [${RED}✖${RESET}] $*"; }
+# Use single-column ASCII symbols so terminals never clip the brackets.
+info() { say "  [${CYAN}i${RESET}] $*"; }
+ok()   { say "  [${GREEN}+${RESET}] $*"; }
+warn() { say "  [${YELLOW}!${RESET}] $*"; }
+fail() { say "  [${RED}x${RESET}] $*"; }
 
 # Strip ANSI escape sequences so length math matches what the user sees.
 visible_len() {
@@ -252,6 +253,22 @@ box_prompt() {
     printf -v "$__var" '%s' "$reply"
 }
 
+# Single-key input (no Enter). Echoes the key and a newline.
+# Usage: box_key choice "  Toggle: "
+box_key() {
+    local __var="$1" prompt="$2" reply=""
+    if [[ ! -r /dev/tty ]]; then
+        fail "Interactive input requires a terminal. Use --yes for automation."
+        return 1
+    fi
+    # Print prompt without newline so the key appears next to it.
+    printf '%s' "$prompt" > /dev/tty
+    # -n 1: one character; -r: raw; no -s so the key is visible as typed.
+    IFS= read -r -n 1 reply < /dev/tty
+    printf '\n' > /dev/tty
+    printf -v "$__var" '%s' "$reply"
+}
+
 confirm() {
     local prompt="$1" answer
     if (( YES_MODE )); then
@@ -280,12 +297,12 @@ run_step() {
     wait "$pid" || rc=$?
 
     if (( rc == 0 )); then
-        printf '  [%b✔%b] %s\n' "$GREEN" "$RESET" "$label"
+        printf '  [%b+%b] %s\n' "$GREEN" "$RESET" "$label"
         rm -f "$log"
         return 0
     fi
 
-    printf '  [%b✖%b] %s\n' "$RED" "$RESET" "$label"
+    printf '  [%bx%b] %s\n' "$RED" "$RESET" "$label"
     sed -n '1,12p' "$log" >&2
     rm -f "$log"
     return "$rc"
@@ -730,7 +747,7 @@ configure_services() {
         section "Services / auto-discovery"
         for ((i = 0; i < ${#candidates[@]}; i++)); do
             service="${candidates[$i]}"
-            if service_enabled "$service"; then mark="✓"; else mark=" "; fi
+            if service_enabled "$service"; then mark="+"; else mark=" "; fi
             menu_item "$((i + 1))" "$(service_label "$service")" "$mark"
         done
         panel_blank
@@ -812,7 +829,7 @@ toggle_module() {
         for ((idx = 0; idx < ${#all[@]}; idx++)); do
             module="${all[$idx]}"
             if [[ -n "${enabled[$module]:-}" ]]; then
-                menu_item "$((idx + 1))" "$(module_label "$module")" "✓"
+                menu_item "$((idx + 1))" "$(module_label "$module")" "+"
             else
                 menu_item "$((idx + 1))" "$(module_label "$module")" " "
             fi
@@ -822,7 +839,7 @@ toggle_module() {
         section_end
         echo
 
-        box_prompt choice "  Toggle (or 0 to finish): "
+        box_key choice "  Toggle (0=done): "
         case "$choice" in
             0)
                 break
