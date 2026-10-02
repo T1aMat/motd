@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -u
 
 COLORS_FILE="${MOTD_COLORS_FILE:-/etc/update-motd.d/colors.txt}"
 CONFIG_FILE="${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}"
@@ -12,7 +12,8 @@ CONFIG_FILE="${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}"
 if ! declare -p MOTD_SERVICES >/dev/null 2>&1; then
     MOTD_SERVICES=(ssh ufw docker nginx)
 fi
-SERVICES_WIDTH="${SERVICES_WIDTH:-78}"
+
+SERVICES_WIDTH="${SERVICES_WIDTH:-0}"
 
 GREEN_COLOR="${GREEN_COLOR:-${CO:-\e[32m}}"
 RED_COLOR="${RED_COLOR:-${CE:-\e[31m}}"
@@ -29,29 +30,57 @@ service_label() {
         docker) echo "Docker" ;;
         nginx) echo "nginx" ;;
         caddy) echo "Caddy" ;;
-        vnstat) echo "vnStat" ;;
-        marzban) echo "Marzban" ;;
+        fail2ban) echo "Fail2ban" ;;
+        xray) echo "Xray" ;;
+        unbound) echo "Unbound" ;;
+        haproxy) echo "HAProxy" ;;
+        keepalived) echo "Keepalived" ;;
+        etcd) echo "etcd" ;;
+        kubelet) echo "kubelet" ;;
+        postgresql) echo "PostgreSQL" ;;
+        redis-server) echo "Redis" ;;
+        kafka) echo "Kafka" ;;
+        patroni) echo "Patroni" ;;
+        remnanode) echo "RemnaNode" ;;
+        remnawave) echo "Remnawave" ;;
+        dozzle-agent) echo "Dozzle Agent" ;;
+        beszel-agent) echo "Beszel Agent" ;;
         *) echo "$1" ;;
     esac
 }
 
-print_status() {
-    local label="$1"
-    local state="$2"
-
-    if [[ "$state" == "active" ]]; then
-        printf '%b▲%b %s - active' "$GREEN_COLOR" "$NC_COLOR" "$label"
-    else
-        printf '%b▼%b %s - inactive' "$RED_COLOR" "$NC_COLOR" "$label"
-    fi
+service_unit() {
+    case "$1" in
+        ssh)
+            if systemctl cat ssh.service >/dev/null 2>&1; then
+                echo "ssh.service"
+            elif systemctl cat sshd.service >/dev/null 2>&1; then
+                echo "sshd.service"
+            fi
+            ;;
+        *)
+            echo "${1}.service"
+            ;;
+    esac
 }
 
-get_status() {
+service_exists() {
     local service="$1"
 
-    if [[ "$service" == *.service ]]; then
-        service="${service%.service}"
+    if [[ "$service" == "ufw" ]]; then
+        command -v ufw >/dev/null 2>&1
+        return
     fi
+
+    command -v systemctl >/dev/null 2>&1 || return 1
+
+    local unit
+    unit="$(service_unit "$service")"
+    [[ -n "$unit" ]] && systemctl cat "$unit" >/dev/null 2>&1
+}
+
+get_state() {
+    local service="$1"
 
     if [[ "$service" == "ufw" ]] && command -v ufw >/dev/null 2>&1; then
         if timeout 2 ufw status 2>/dev/null | grep -q '^Status: active'; then
@@ -62,54 +91,93 @@ get_status() {
         return 0
     fi
 
-    if ! command -v systemctl >/dev/null 2>&1; then
-        return 1
+    command -v systemctl >/dev/null 2>&1 || return 1
+
+    local unit
+    unit="$(service_unit "$service")"
+    [[ -n "$unit" ]] || return 1
+
+    systemctl show -p ActiveState --value "$unit" 2>/dev/null
+}
+
+terminal_width() {
+    local width="$SERVICES_WIDTH"
+
+    if [[ "$width" =~ ^[0-9]+$ ]] && (( width >= 40 )); then
+        echo "$width"
+        return
     fi
 
-    if ! systemctl cat "${service}.service" >/dev/null 2>&1; then
-        return 1
+    if command -v tput >/dev/null 2>&1; then
+        width="$(tput cols 2>/dev/null || true)"
     fi
 
-    systemctl show -p ActiveState --value "${service}.service" 2>/dev/null || return 1
+    if ! [[ "$width" =~ ^[0-9]+$ ]] || (( width < 40 )); then
+        width=78
+    fi
+
+    echo "$width"
+}
+
+status_text() {
+    local label="$1"
+    local state="$2"
+
+    if [[ "$state" == "active" ]]; then
+        printf '%b▲%b %s' "$GREEN_COLOR" "$NC_COLOR" "$label"
+    else
+        printf '%b▼%b %s' "$RED_COLOR" "$NC_COLOR" "$label"
+    fi
 }
 
 statuses=()
 for service in "${MOTD_SERVICES[@]}"; do
     [[ -n "$service" ]] || continue
-    state="$(get_status "$service" || true)"
-    [[ "$state" == "active" || "$state" == "inactive" ]] || continue
-    label="$(service_label "$service")"
-    statuses+=("$(print_status "$label" "$state")")
+    service_exists "$service" || continue
+
+    state="$(get_state "$service" || true)"
+    [[ "$state" == active || "$state" == inactive ]] || continue
+
+    statuses+=("$(status_text "$(service_label "$service")" "$state")")
 done
 
 ((${#statuses[@]} > 0)) || exit 0
 
-prefix=" Services............:"
-prefix_visible="$(strip_ansi "$prefix")"
-prefix_len=${#prefix_visible}
-continuation="$(printf '%*s' "$((prefix_len + 1))" '')"
+prefix=" Services............: "
+prefix_plain="$(strip_ansi "$prefix")"
+prefix_len=${#prefix_plain}
 
+width="$(terminal_width)"
+(( width <= prefix_len + 10 )) && width=$((prefix_len + 10))
+
+continuation="$(printf '%*s' "$prefix_len" '')"
 line="$prefix"
 line_len=$prefix_len
 first=1
+
 for status in "${statuses[@]}"; do
     visible="$(strip_ansi "$status")"
+
     if (( first )); then
-        candidate_len=$((line_len + 1 + ${#visible}))
-        first=0
+        candidate_len=$((line_len + ${#visible}))
     else
         candidate_len=$((line_len + 3 + ${#visible}))
     fi
 
-    if [[ "$first" -eq 0 && $candidate_len -gt $SERVICES_WIDTH ]]; then
+    if (( !first && candidate_len > width )); then
         printf '%b\n' "$line"
         line="${continuation}${status}"
-        line_len=$((prefix_len + 1 + ${#visible}))
-    elif [[ "$line" == "$prefix" ]]; then
-        line="${prefix} ${status}"
-        line_len=$candidate_len
+        line_len=$((prefix_len + ${#visible}))
+        first=1
+        continue
+    fi
+
+    if (( first )); then
+        line+="$status"
+        line_len=$((line_len + ${#visible}))
+        first=0
     else
-        line="${line} | ${status}"
+        line+=" | $status"
         line_len=$candidate_len
     fi
 done
