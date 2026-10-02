@@ -1,9 +1,32 @@
 # T1aMat MOTD configuration
 # Installed to /etc/t1amat-motd.conf on first install.
 # This file is preserved across MOTD updates.
+#
+# MOTD_ORDER controls BOTH visibility and order:
+# - listed = enabled
+# - omitted = disabled
+#
+# Use the installer:
+#   4) Configure MOTD
+#
+# or edit this file manually.
 
 MOTD_HEADER="T1aMat"
 
+MOTD_ORDER=(
+    last-login
+    uptime
+    load-average
+    memory
+    disk-usage
+    logins
+    processes
+    services
+    docker
+)
+
+# Services shown by 09-services.
+# The installer can auto-discover installed services and let you select them.
 MOTD_SERVICES=(
     ssh
     ufw
@@ -17,6 +40,9 @@ MOTD_DISKS=(
 
 WARN_PCT=80
 CRIT_PCT=90
-SERVICES_WIDTH=78
+
+# 0 = automatically fit the current terminal width.
+SERVICES_WIDTH=0
+
 DOCKER_TIMEOUT=3
 SSH_LOGIN_LOOKBACK=200
