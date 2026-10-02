@@ -1,3 +1,3 @@
 #!/bin/bash
-
-echo ""
+# Trailing blank line so the shell prompt is separated from the last MOTD line.
+printf '\n'
