@@ -6,7 +6,7 @@ SCRIPT_VERSION="3.2.0"
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/install.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
-UI_WIDTH=50
+UI_WIDTH=54
 MOTD_DIR="/etc/update-motd.d"
 OLD_MOTD_DIR="${MOTD_DIR}/old-motd"
 CONFIG_FILE="/etc/t1amat-motd.conf"
@@ -136,25 +136,63 @@ ok() { say "${GREEN}✔${RESET}  $*"; }
 warn() { say "${YELLOW}⚠${RESET}  $*"; }
 fail() { say "${RED}✖${RESET}  $*"; }
 
+# Strip ANSI escape sequences so length math matches what the user sees.
+visible_len() {
+    local s="$1"
+    # shellcheck disable=SC2001
+    s="$(printf '%b' "$s" | sed 's/\x1B\[[0-9;?]*[ -/]*[@-~]//g')"
+    printf '%s' "${#s}"
+}
+
 repeat_char() {
     local char="$1" count="$2" out="" i
+    (( count < 0 )) && count=0
     for ((i = 0; i < count; i++)); do
         out+="$char"
     done
     printf '%s' "$out"
 }
 
-center_text() {
-    local text="$1" len=${#1}
-    local left=$(( (UI_WIDTH - len) / 2 ))
-    local right=$(( UI_WIDTH - len - left ))
-    (( left < 0 )) && left=0
-    (( right < 0 )) && right=0
-    printf '%*s%s%*s' "$left" '' "$text" "$right" ''
+# Pad or truncate a visible string to exactly UI_WIDTH columns (ANSI-aware).
+fit_width() {
+    local text="$1"
+    local target="${2:-$UI_WIDTH}"
+    local plain len pad
+    # shellcheck disable=SC2001
+    plain="$(printf '%b' "$text" | sed 's/\x1B\[[0-9;?]*[ -/]*[@-~]//g')"
+    len=${#plain}
+    if (( len > target )); then
+        # Truncate plain text and rebuild without trying to preserve partial ANSI.
+        printf '%s' "${plain:0:target-1}…"
+        return
+    fi
+    pad=$(( target - len ))
+    printf '%b%s' "$text" "$(repeat_char ' ' "$pad")"
 }
 
+center_text() {
+    local text="$1" target="${2:-$UI_WIDTH}"
+    local plain len left right
+    # shellcheck disable=SC2001
+    plain="$(printf '%b' "$text" | sed 's/\x1B\[[0-9;?]*[ -/]*[@-~]//g')"
+    len=${#plain}
+    if (( len > target )); then
+        printf '%s' "${plain:0:target-1}…"
+        return
+    fi
+    left=$(( (target - len) / 2 ))
+    right=$(( target - len - left ))
+    printf '%*s%b%*s' "$left" '' "$text" "$right" ''
+}
+
+# Top border of a panel. Title is clipped so the line is always UI_WIDTH+2 wide.
 section() {
     local title="$1"
+    local max_title=$(( UI_WIDTH - 4 ))
+    (( max_title < 8 )) && max_title=8
+    if (( ${#title} > max_title )); then
+        title="${title:0:max_title-1}…"
+    fi
     local d=$(( UI_WIDTH - ${#title} - 2 ))
     local left=$(( d / 2 ))
     local right=$(( d - left ))
@@ -167,11 +205,37 @@ section_end() {
     say "${CYAN}${BOLD}└$(repeat_char '─' "$UI_WIDTH")┘${RESET}"
 }
 
+# Content line inside a panel: fitted to UI_WIDTH (no side borders).
+panel_line() {
+    local text="${1:-}"
+    say "$(fit_width "$text")"
+}
+
+# Blank interior line.
+panel_blank() {
+    panel_line ""
+}
+
+# Consistent menu entry: yellow number, clipped label.
+# Usage: menu_item 1 "Install / update MOTD"
+#        menu_item "e" "Enable / disable line"
+#        menu_item 3 "Services" "✓"   # optional mark in [✓]/[ ]
+menu_item() {
+    local key="$1" label="$2" mark="${3-}"
+    local body
+    if [[ -n "$mark" ]]; then
+        body="  ${YELLOW}${key})${RESET} [${mark}] ${label}"
+    else
+        body="  ${YELLOW}${key})${RESET} ${label}"
+    fi
+    panel_line "$body"
+}
+
 banner() {
     clear 2>/dev/null || true
     say "${CYAN}${BOLD}╔$(repeat_char '═' "$UI_WIDTH")╗${RESET}"
-    say "${CYAN}${BOLD}║${WHITE}$(center_text "T1aMat MOTD")${CYAN}${BOLD}║${RESET}"
-    say "${CYAN}${BOLD}║${GRAY}$(center_text "Universal installer v${SCRIPT_VERSION}")${CYAN}${BOLD}║${RESET}"
+    say "${CYAN}${BOLD}║${RESET}${WHITE}$(center_text "T1aMat MOTD")${RESET}${CYAN}${BOLD}║${RESET}"
+    say "${CYAN}${BOLD}║${RESET}${GRAY}$(center_text "Universal installer v${SCRIPT_VERSION}")${RESET}${CYAN}${BOLD}║${RESET}"
     say "${CYAN}${BOLD}╚$(repeat_char '═' "$UI_WIDTH")╝${RESET}"
     echo
 }
@@ -340,11 +404,11 @@ system_summary() {
     # shellcheck source=/dev/null
     . /etc/os-release 2>/dev/null || true
     section "System"
-    say "  ${GRAY}OS           :${RESET} ${PRETTY_NAME:-unknown}"
-    say "  ${GRAY}Hostname     :${RESET} $(hostname 2>/dev/null || echo unknown)"
-    say "  ${GRAY}Kernel       :${RESET} $(uname -r 2>/dev/null || echo unknown)"
-    say "  ${GRAY}Architecture :${RESET} $(uname -m 2>/dev/null || echo unknown)"
-    say "  ${GRAY}MOTD profile :${RESET} ${OS_FLAVOR}"
+    panel_line "  ${GRAY}OS           :${RESET} ${PRETTY_NAME:-unknown}"
+    panel_line "  ${GRAY}Hostname     :${RESET} $(hostname 2>/dev/null || echo unknown)"
+    panel_line "  ${GRAY}Kernel       :${RESET} $(uname -r 2>/dev/null || echo unknown)"
+    panel_line "  ${GRAY}Architecture :${RESET} $(uname -m 2>/dev/null || echo unknown)"
+    panel_line "  ${GRAY}MOTD profile :${RESET} ${OS_FLAVOR}"
     section_end
     echo
 }
@@ -652,26 +716,30 @@ configure_services() {
 
     section "Services / auto-discovery"
     if ((${#candidates[@]} == 0)); then
-        info "No supported services were detected."
+        panel_line "  No supported services were detected."
         section_end
         return 0
     fi
 
-    say "  Select services to show in the MOTD."
-    say "  Discovered services are candidates; nothing is added silently."
+    panel_line "  Select services to show in the MOTD."
+    panel_line "  Nothing is added silently."
+    section_end
     echo
 
     while true; do
         local i service mark choice
+        section "Services / auto-discovery"
         for ((i = 0; i < ${#candidates[@]}; i++)); do
             service="${candidates[$i]}"
             if service_enabled "$service"; then mark="✓"; else mark=" "; fi
-            printf '  %d) [%s] %s\n' "$((i + 1))" "$mark" "$(service_label "$service")"
+            menu_item "$((i + 1))" "$(service_label "$service")" "$mark"
         done
+        panel_blank
+        menu_item a "Add custom service"
+        menu_item r "Refresh discovery"
+        menu_item 0 "Done"
+        section_end
         echo
-        say "  a) Add custom service"
-        say "  r) Refresh discovery"
-        say "  0) Done"
 
         box_prompt choice "  Select: "
         case "$choice" in
@@ -713,7 +781,6 @@ configure_services() {
 
     replace_config_array "MOTD_SERVICES" "${MOTD_SERVICES[@]}"
     ok "Services configuration saved."
-    section_end
 }
 
 module_enabled() {
@@ -726,39 +793,72 @@ module_enabled() {
 
 toggle_module() {
     load_config
-    local idx module
+    local idx module choice
     local all=("${KNOWN_MODULES[@]}")
+    # Track enabled modules as a set while preserving canonical KNOWN_MODULES order.
+    local -A enabled=()
+    local x
+    for x in "${MOTD_ORDER[@]}"; do
+        enabled["$x"]=1
+    done
 
     section "Enable / disable MOTD lines"
-    for ((idx = 0; idx < ${#all[@]}; idx++)); do
-        module="${all[$idx]}"
-        if module_enabled "$module"; then
-            printf '  %d) [✓] %s\n' "$((idx + 1))" "$(module_label "$module")"
-        else
-            printf '  %d) [ ] %s\n' "$((idx + 1))" "$(module_label "$module")"
-        fi
-    done
-    echo
-    say "  0) Done"
-
-    local choice
-    box_prompt choice "  Toggle: "
-    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice > 0 && choice <= ${#all[@]} )); then
-        module="${all[$((choice - 1))]}"
-        if module_enabled "$module"; then
-            local next=()
-            local x
-            for x in "${MOTD_ORDER[@]}"; do
-                [[ "$x" != "$module" ]] && next+=("$x")
-            done
-            MOTD_ORDER=("${next[@]}")
-        else
-            MOTD_ORDER+=("$module")
-        fi
-        replace_config_array "MOTD_ORDER" "${MOTD_ORDER[@]}"
-        ok "$(module_enabled "$module" && echo "Enabled" || echo "Disabled"): $(module_label "$module")"
-    fi
+    panel_line "  Toggle one or more lines."
+    panel_line "  Order always follows this list."
     section_end
+    echo
+
+    while true; do
+        section "Enable / disable MOTD lines"
+        for ((idx = 0; idx < ${#all[@]}; idx++)); do
+            module="${all[$idx]}"
+            if [[ -n "${enabled[$module]:-}" ]]; then
+                menu_item "$((idx + 1))" "$(module_label "$module")" "✓"
+            else
+                menu_item "$((idx + 1))" "$(module_label "$module")" " "
+            fi
+        done
+        panel_blank
+        menu_item 0 "Done"
+        section_end
+        echo
+
+        box_prompt choice "  Toggle (or 0 to finish): "
+        case "$choice" in
+            0)
+                break
+                ;;
+            ''|*[!0-9]*)
+                warn "Invalid selection."
+                echo
+                continue
+                ;;
+            *)
+                if (( choice < 1 || choice > ${#all[@]} )); then
+                    warn "Invalid selection."
+                    echo
+                    continue
+                fi
+                module="${all[$((choice - 1))]}"
+                if [[ -n "${enabled[$module]:-}" ]]; then
+                    unset "enabled[$module]"
+                    ok "Disabled: $(module_label "$module")"
+                else
+                    enabled["$module"]=1
+                    ok "Enabled: $(module_label "$module")"
+                fi
+                echo
+                ;;
+        esac
+    done
+
+    # Rebuild MOTD_ORDER from KNOWN_MODULES so display order matches enable list.
+    MOTD_ORDER=()
+    for module in "${all[@]}"; do
+        [[ -n "${enabled[$module]:-}" ]] && MOTD_ORDER+=("$module")
+    done
+    replace_config_array "MOTD_ORDER" "${MOTD_ORDER[@]}"
+    ok "MOTD lines saved (${#MOTD_ORDER[@]} enabled)."
 }
 
 move_module() {
@@ -771,13 +871,13 @@ move_module() {
 
     section "Move MOTD line"
     for ((i = 0; i < ${#MOTD_ORDER[@]}; i++)); do
-        printf '  %d) %s\n' "$((i + 1))" "$(module_label "${MOTD_ORDER[$i]}")"
+        menu_item "$((i + 1))" "$(module_label "${MOTD_ORDER[$i]}")"
     done
+    section_end
     echo
     box_prompt choice "  Select module: "
 
     if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#MOTD_ORDER[@]} )); then
-        section_end
         return 0
     fi
 
@@ -786,23 +886,22 @@ move_module() {
 
     case "$direction" in
         u|U)
-            (( i > 0 )) || { section_end; return 0; }
+            (( i > 0 )) || return 0
             tmp="${MOTD_ORDER[i]}"
             MOTD_ORDER[i]="${MOTD_ORDER[i - 1]}"
             MOTD_ORDER[i - 1]="$tmp"
             ;;
         d|D)
-            (( i < ${#MOTD_ORDER[@]} - 1 )) || { section_end; return 0; }
+            (( i < ${#MOTD_ORDER[@]} - 1 )) || return 0
             tmp="${MOTD_ORDER[i]}"
             MOTD_ORDER[i]="${MOTD_ORDER[i + 1]}"
             MOTD_ORDER[i + 1]="$tmp"
             ;;
-        *) section_end; return 0 ;;
+        *) return 0 ;;
     esac
 
     replace_config_array "MOTD_ORDER" "${MOTD_ORDER[@]}"
     ok "MOTD order updated."
-    section_end
 }
 
 configure_layout() {
@@ -813,26 +912,35 @@ configure_layout() {
         section "MOTD layout"
 
         local i choice
-        for ((i = 0; i < ${#MOTD_ORDER[@]}; i++)); do
-            printf '  %d) %s\n' "$((i + 1))" "$(module_label "${MOTD_ORDER[$i]}")"
-        done
-        echo
-        say "  e) Enable / disable line"
-        say "  m) Move line"
-        say "  d) Reset to default order"
-        say "  0) Back"
+        if ((${#MOTD_ORDER[@]} == 0)); then
+            panel_line "  ${GRAY}(no lines enabled)${RESET}"
+        else
+            for ((i = 0; i < ${#MOTD_ORDER[@]}; i++)); do
+                menu_item "$((i + 1))" "$(module_label "${MOTD_ORDER[$i]}")"
+            done
+        fi
+        panel_blank
+        menu_item e "Enable / disable line"
+        menu_item m "Move line"
+        menu_item d "Reset to default order"
+        menu_item 0 "Back"
         section_end
         echo
 
         box_prompt choice "Select an option: "
         case "$choice" in
-            e|E) toggle_module ;;
+            e|E)
+                toggle_module
+                # toggle_module already loops until Done; no extra prompt
+                continue
+                ;;
             m|M) move_module ;;
             d|D)
                 mapfile -t MOTD_ORDER < <(default_module_order)
                 replace_config_array "MOTD_ORDER" "${MOTD_ORDER[@]}"
                 ok "Default MOTD order restored."
                 sleep 1
+                continue
                 ;;
             0) return 0 ;;
             *) warn "Invalid choice." ;;
@@ -851,10 +959,10 @@ configure_motd() {
         detect_os
         system_summary
         section "MOTD configuration"
-        say "  1) MOTD lines / order / enable / disable"
-        say "  2) Services / auto-discovery"
-        say "  3) Reset MOTD order to defaults"
-        say "  0) Back"
+        menu_item 1 "MOTD lines / order / enable / disable"
+        menu_item 2 "Services / auto-discovery"
+        menu_item 3 "Reset MOTD order to defaults"
+        menu_item 0 "Back"
         section_end
         echo
 
@@ -1489,11 +1597,11 @@ show_menu() {
         system_summary
 
         section "Main menu"
-        say "  ${YELLOW}1)${RESET} Install / update MOTD"
-        say "  ${YELLOW}2)${RESET} Uninstall / restore MOTD"
-        say "  ${YELLOW}3)${RESET} Check installation"
-        say "  ${YELLOW}4)${RESET} Configure MOTD"
-        say "  ${YELLOW}0)${RESET} Exit"
+        menu_item 1 "Install / update MOTD"
+        menu_item 2 "Uninstall / restore MOTD"
+        menu_item 3 "Check installation"
+        menu_item 4 "Configure MOTD"
+        menu_item 0 "Exit"
         section_end
         echo
 
@@ -1512,6 +1620,8 @@ show_menu() {
                 ;;
             4)
                 configure_motd
+                # Returning from config submenu — no extra "Press Enter"
+                continue
                 ;;
             0)
                 echo
