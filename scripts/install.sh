@@ -131,11 +131,11 @@ cleanup_temp() {
 trap cleanup_temp EXIT
 
 say() { printf '%b\n' "$*"; }
-# Status lines: "  [mark] message" — brackets default, only the symbol colored.
-info() { say "  [${CYAN}ℹ${RESET}] $*"; }
-ok()   { say "  [${GREEN}✔${RESET}] $*"; }
-warn() { say "  [${YELLOW}⚠${RESET}] $*"; }
-fail() { say "  [${RED}✖${RESET}] $*"; }
+# Status lines: "  [mark] message" — brackets default, symbol bold+colored.
+info() { say "  [${BOLD}${CYAN}ℹ${RESET}] $*"; }
+ok()   { say "  [${BOLD}${GREEN}✔${RESET}] $*"; }
+warn() { say "  [${BOLD}${YELLOW}⚠${RESET}] $*"; }
+fail() { say "  [${BOLD}${RED}✖${RESET}] $*"; }
 
 # Strip ANSI escape sequences so length math matches what the user sees.
 visible_len() {
@@ -210,7 +210,8 @@ panel_line() {
     plain="$(printf '%b' "$text" | sed 's/\x1B\[[0-9;?]*[ -/]*[@-~]//g')"
     len=${#plain}
     if (( len > max )); then
-        say "  ${plain:0:max-1}…"
+        # plain already contains the leading indent — do not add more spaces
+        say "${plain:0:max-1}…"
     else
         say "$text"
     fi
@@ -229,9 +230,9 @@ menu_item() {
     local key="$1" label="$2" mark="${3-}"
     local body
     if [[ -n "$mark" ]]; then
-        body="  ${YELLOW}${key})${RESET} [${mark}] ${label}"
+        body="  ${BOLD}${YELLOW}${key}.${RESET} [${mark}] ${label}"
     else
-        body="  ${YELLOW}${key})${RESET} ${label}"
+        body="  ${BOLD}${YELLOW}${key}.${RESET} ${label}"
     fi
     panel_line "$body"
 }
@@ -300,12 +301,12 @@ run_step() {
     wait "$pid" || rc=$?
 
     if (( rc == 0 )); then
-        printf '  [%b✔%b] %s\n' "$GREEN" "$RESET" "$label"
+        printf '  [%b✔%b] %s\n' "${BOLD}${GREEN}" "$RESET" "$label"
         rm -f "$log"
         return 0
     fi
 
-    printf '  [%b✖%b] %s\n' "$RED" "$RESET" "$label"
+    printf '  [%b✖%b] %s\n' "${BOLD}${RED}" "$RESET" "$label"
     sed -n '1,12p' "$log" >&2
     rm -f "$log"
     return "$rc"
