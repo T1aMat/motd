@@ -13,8 +13,6 @@ if ! declare -p MOTD_SERVICES >/dev/null 2>&1; then
     MOTD_SERVICES=(ssh ufw docker nginx)
 fi
 
-SERVICES_WIDTH="${SERVICES_WIDTH:-0}"
-
 GREEN_COLOR="${GREEN_COLOR:-${CO:-\e[32m}}"
 RED_COLOR="${RED_COLOR:-${CE:-\e[31m}}"
 NC_COLOR="${NC_COLOR:-${CN:-\e[0m}}"
@@ -49,34 +47,25 @@ service_label() {
     esac
 }
 
-service_unit() {
-    case "$1" in
-        ssh)
-            if systemctl cat ssh.service >/dev/null 2>&1; then
-                echo "ssh.service"
-            elif systemctl cat sshd.service >/dev/null 2>&1; then
-                echo "sshd.service"
-            fi
-            ;;
-        *)
-            echo "${1}.service"
-            ;;
-    esac
-}
-
 service_exists() {
     local service="$1"
 
-    if [[ "$service" == "ufw" ]]; then
-        command -v ufw >/dev/null 2>&1
-        return
-    fi
-
-    command -v systemctl >/dev/null 2>&1 || return 1
-
-    local unit
-    unit="$(service_unit "$service")"
-    [[ -n "$unit" ]] && systemctl cat "$unit" >/dev/null 2>&1
+    case "$service" in
+        ufw)
+            command -v ufw >/dev/null 2>&1
+            ;;
+        docker)
+            command -v docker >/dev/null 2>&1 ||
+                systemctl cat docker.service >/dev/null 2>&1
+            ;;
+        ssh)
+            systemctl cat ssh.service >/dev/null 2>&1 ||
+                systemctl cat sshd.service >/dev/null 2>&1
+            ;;
+        *)
+            systemctl cat "${service}.service" >/dev/null 2>&1
+            ;;
+    esac
 }
 
 get_state() {
@@ -93,15 +82,22 @@ get_state() {
 
     command -v systemctl >/dev/null 2>&1 || return 1
 
-    local unit
-    unit="$(service_unit "$service")"
-    [[ -n "$unit" ]] || return 1
-
-    systemctl show -p ActiveState --value "$unit" 2>/dev/null
+    case "$service" in
+        ssh)
+            if systemctl cat ssh.service >/dev/null 2>&1; then
+                systemctl show -p ActiveState --value ssh.service 2>/dev/null
+            else
+                systemctl show -p ActiveState --value sshd.service 2>/dev/null
+            fi
+            ;;
+        *)
+            systemctl show -p ActiveState --value "${service}.service" 2>/dev/null
+            ;;
+    esac
 }
 
-terminal_width() {
-    local width="$SERVICES_WIDTH"
+term_width() {
+    local width="${SERVICES_WIDTH:-0}"
 
     if [[ "$width" =~ ^[0-9]+$ ]] && (( width >= 40 )); then
         echo "$width"
@@ -120,8 +116,7 @@ terminal_width() {
 }
 
 status_text() {
-    local label="$1"
-    local state="$2"
+    local label="$1" state="$2"
 
     if [[ "$state" == "active" ]]; then
         printf '%b▲%b %s' "$GREEN_COLOR" "$NC_COLOR" "$label"
@@ -138,48 +133,51 @@ for service in "${MOTD_SERVICES[@]}"; do
     state="$(get_state "$service" || true)"
     [[ "$state" == active || "$state" == inactive ]] || continue
 
-    statuses+=("$(status_text "$(service_label "$service")" "$state")")
+    label="$(service_label "$service")"
+    statuses+=("$(status_text "$label" "$state")")
 done
 
 ((${#statuses[@]} > 0)) || exit 0
 
-prefix=" Services............: "
-prefix_plain="$(strip_ansi "$prefix")"
-prefix_len=${#prefix_plain}
+prefix=" Services............:"
+plain_prefix="$(strip_ansi "$prefix")"
+prefix_len=${#plain_prefix}
+width="$(term_width)"
+available=$(( width - prefix_len - 1 ))
 
-width="$(terminal_width)"
-(( width <= prefix_len + 10 )) && width=$((prefix_len + 10))
+(( available < 20 )) && available=20
 
-continuation="$(printf '%*s' "$prefix_len" '')"
 line="$prefix"
 line_len=$prefix_len
 first=1
+continuation="$(printf '%*s' "$prefix_len" '')"
 
 for status in "${statuses[@]}"; do
     visible="$(strip_ansi "$status")"
+    separator=3
 
     if (( first )); then
-        candidate_len=$((line_len + ${#visible}))
-    else
-        candidate_len=$((line_len + 3 + ${#visible}))
+        separator=1
     fi
+
+    candidate_len=$(( line_len + separator + ${#visible} ))
 
     if (( !first && candidate_len > width )); then
         printf '%b\n' "$line"
-        line="${continuation}${status}"
-        line_len=$((prefix_len + ${#visible}))
+        line="$continuation"
+        line_len=$prefix_len
         first=1
-        continue
+        separator=1
     fi
 
-    if (( first )); then
-        line+="$status"
-        line_len=$((line_len + ${#visible}))
-        first=0
-    else
-        line+=" | $status"
-        line_len=$candidate_len
+    if (( !first )); then
+        line+=" | "
+        line_len=$(( line_len + 3 ))
     fi
+
+    line+="$status"
+    line_len=$(( line_len + ${#visible} ))
+    first=0
 done
 
 printf '%b\n' "$line"
