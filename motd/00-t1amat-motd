@@ -4,10 +4,10 @@ set -u
 MOTD_DIR="${MOTD_DIR:-/etc/update-motd.d}"
 CONFIG_FILE="${MOTD_CONFIG_FILE:-/etc/t1amat-motd.conf}"
 
-[[ -r "$CONFIG_FILE" ]] && {
+if [[ -r "$CONFIG_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$CONFIG_FILE"
-}
+fi
 
 MOTD_ORDER_DEFAULT=(
     last-login
@@ -25,6 +25,18 @@ if ! declare -p MOTD_ORDER >/dev/null 2>&1; then
     MOTD_ORDER=("${MOTD_ORDER_DEFAULT[@]}")
 fi
 
+if ! declare -p MOTD_DISABLED >/dev/null 2>&1; then
+    MOTD_DISABLED=()
+fi
+
+module_disabled() {
+    local needle="$1" item
+    for item in "${MOTD_DISABLED[@]}"; do
+        [[ "$item" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
 module_file() {
     case "$1" in
         last-login) echo "$MOTD_DIR/01-last-login" ;;
@@ -41,18 +53,16 @@ module_file() {
 }
 
 for module in "${MOTD_ORDER[@]}"; do
-    file="$(module_file "$module")"
+    module_disabled "$module" && continue
 
+    file="$(module_file "$module")"
     [[ -f "$file" ]] || continue
     [[ "$file" == "$MOTD_DIR/00-t1amat-motd" ]] && continue
     [[ "$file" == "$MOTD_DIR/00-header" ]] && continue
 
-    if ! bash "$file"; then
-        # MOTD must never prevent a login because one optional module failed.
-        :
-    fi
-done
+    bash "$file" || true
+ done
 
-# Always leave one blank line between the last MOTD line and the shell prompt.
+# Keep the shell prompt visually separated from the MOTD.
 echo
 exit 0
