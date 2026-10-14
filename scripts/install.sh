@@ -1,128 +1,96 @@
-        "$MOTD_DIR/03-uptime" \
-        "$MOTD_DIR/04-load-average" \
-        "$MOTD_DIR/05-memory" \
-        "$MOTD_DIR/06-disk-usage" \
-        "$MOTD_DIR/07-logins" \
-        "$MOTD_DIR/08-processes" \
-        "$MOTD_DIR/09-services" \
-        "$MOTD_DIR/10-docker"
-    do
-        if [[ -x "$file" ]]; then
-            legacy_exec=1
-            warn "Numbered module is executable: ${file##*/}"
-        fi
-    done
-    if (( legacy_exec )); then
-        warn "Numbered modules must be dispatcher-only to avoid duplicate MOTD output."
-        problems=$((problems + 1))
-    elif (( ! legacy_detected )); then
-        ok "Numbered MOTD modules are dispatcher-only."
-    fi
+#!/bin/bash
+set -euo pipefail
+set -E
 
-    if [[ -f "$CONFIG_FILE" ]]; then
-        # shellcheck source=/dev/null
-        source "$CONFIG_FILE"
-        config_header="${MOTD_HEADER:-T1aMat}"
-        ok "Header configured as: $config_header"
-        if declare -p MOTD_ORDER >/dev/null 2>&1; then
-            local disabled_count=0
-            declare -p MOTD_DISABLED >/dev/null 2>&1 && disabled_count=${#MOTD_DISABLED[@]}
-            ok "MOTD order configured: ${#MOTD_ORDER[@]} line(s), ${disabled_count} disabled."
-        elif (( ! legacy_detected )); then
-            warn "MOTD_ORDER is missing."
-            problems=$((problems + 1))
-        fi
-    fi
+SCRIPT_VERSION="3.2.1"
+SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/install.sh"
+REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
-    if [[ -f "$SSHD_DROPIN" ]] && grep -q 'Managed by T1aMat MOTD' "$SSHD_DROPIN" &&
-       command -v sshd >/dev/null 2>&1; then
-        sshd_query_printlastlog
-        effective="$SSHD_EFFECTIVE"
-        if [[ "$effective" == "no" ]]; then
-            ok "SSH PrintLastLog is disabled."
-        else
-            warn "SSH PrintLastLog effective value: ${effective}"
-            problems=$((problems + 1))
-        fi
-    else
-        info "T1aMat SSH PrintLastLog drop-in is not installed."
-    fi
+UI_WIDTH=54
+MOTD_DIR="/etc/update-motd.d"
+OLD_MOTD_DIR="${MOTD_DIR}/old-motd"
+CONFIG_FILE="/etc/t1amat-motd.conf"
+STATE_DIR="/var/lib/t1amat-motd"
+MANIFEST_FILE="${STATE_DIR}/installed-manifest.sha256"
+CONFIG_BACKUP="${STATE_DIR}/t1amat-motd.conf.backup"
+CONFIG_STATE="${STATE_DIR}/config.state"
+ETC_MOTD_BACKUP="${STATE_DIR}/etc-motd.backup"
+ETC_MOTD_STATE="${STATE_DIR}/etc-motd.state"
+COLORS_STATE="${STATE_DIR}/colors.state"
+COLORS_HASH="${STATE_DIR}/colors.installed.sha256"
+LEGACY_MOTD_DIR="${STATE_DIR}/legacy-motd"
+SSHD_DROPIN="/etc/ssh/sshd_config.d/00-t1amat-motd.conf"
+SSHD_DROPIN_HASH="${STATE_DIR}/sshd-dropin.sha256"
 
-    if (( USE_ETC_MOTD_LINK )); then
-        if [[ -L /etc/motd ]] && [[ "$(readlink /etc/motd)" == "/var/run/motd" ]]; then
-            ok "/etc/motd is linked to /var/run/motd."
-        else
-            warn "/etc/motd is not linked as expected for ${OS_FLAVOR}."
-            problems=$((problems + 1))
-        fi
-    fi
+OS_FLAVOR=""
+USE_ETC_MOTD_LINK=0
+YES_MODE=0
+DRY_RUN=0
+HEADER_OVERRIDE=""
+COMMAND=""
+TEMP_DIR=""
+CONFIG_CREATED=0
 
-    if [[ -f "$MANIFEST_FILE" ]]; then
-        ok "Installation manifest exists."
-    elif (( ! legacy_detected )); then
-        warn "Installation manifest is missing."
-        problems=$((problems + 1))
-    fi
+KNOWN_MODULES=(
+    last-login
+    uptime
+    load-average
+    memory
+    disk-usage
+    logins
+    processes
+    services
+    docker
+)
 
-    if (( problems == 0 )); then
-        ok "Installation check passed."
-    else
-        warn "Installation check found ${problems} issue(s)."
-    fi
-    section_end
-}
+declare -A MODULE_LABELS=(
+    [last-login]="Last login"
+    [uptime]="Uptime"
+    [load-average]="Load averages"
+    [memory]="Memory"
+    [disk-usage]="Disk usage"
+    [logins]="SSH logins"
+    [processes]="Processes"
+    [services]="Services"
+    [docker]="Docker containers"
+)
 
-show_menu() {
-    while true; do
-        banner
-        detect_os
-        system_summary
+KNOWN_SERVICES=(
+    ssh
+    ufw
+    docker
+    nginx
+    caddy
+    fail2ban
+    xray
+    unbound
+    haproxy
+    keepalived
+    etcd
+    kubelet
+    postgresql
+    redis-server
+    kafka
+    patroni
+    remnanode
+    remnawave
+    dozzle-agent
+    beszel-agent
+)
 
-        section "Main menu"
-        menu_item 1 "Install / update MOTD"
-        menu_item 2 "Uninstall / restore MOTD"
-        menu_item 3 "Check installation"
-        menu_item 4 "Configure MOTD"
-        menu_item 0 "Exit"
-        section_end
-        echo
-
-        local choice
-        box_prompt choice "Select an option: "
-
-        case "$choice" in
-            1)
-                install_motd
-                ;;
-            2)
-                uninstall_motd
-                ;;
-            3)
-                check_installation
-                ;;
-            4)
-                configure_motd
-                ;;
-            0)
-                echo
-                ok "Goodbye."
-                return 0
-                ;;
-            *)
-                warn "Invalid choice."
-                ;;
-        esac
-
-        echo
-        [[ -r /dev/tty ]] && read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true
-    done
-}
-
-main() {
-    parse_args "$@"
-    require_root "$@"
-    ensure_tools
-    detect_os
-
-    case "$COMMAND" in
-        install) install_motd ;;
+declare -A SERVICE_LABELS=(
+    [ssh]="SSH"
+    [sshd]="SSH"
+    [ufw]="UFW"
+    [docker]="Docker"
+    [nginx]="nginx"
+    [caddy]="Caddy"
+    [fail2ban]="Fail2ban"
+    [xray]="Xray"
+    [unbound]="Unbound"
+    [haproxy]="HAProxy"
+    [keepalived]="Keepalived"
+    [etcd]="etcd"
+    [kubelet]="kubelet"
+    [postgresql]="PostgreSQL"
+    [redis-server]="Redis"
