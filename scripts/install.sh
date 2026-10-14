@@ -365,7 +365,7 @@ require_root() {
         rm -f "$tmp"
         fail "Could not download the installer for privileged re-execution."
         exit 1
-    }
+    fi
     sudo bash "$tmp" "$@"
     rc=$?
     rm -f "$tmp"
