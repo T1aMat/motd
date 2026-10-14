@@ -102,14 +102,14 @@ declare -A SERVICE_LABELS=(
     [beszel-agent]="Beszel Agent"
 )
 
-RESET='[0m'
-BOLD='[1m'
-GREEN='[1;32m'
-CYAN='[1;36m'
-YELLOW='[1;33m'
-RED='[1;31m'
-WHITE='[1;37m'
-GRAY='[0;90m'
+RESET='\033[0m'
+BOLD='\033[1m'
+GREEN='\033[1;32m'
+CYAN='\033[1;36m'
+YELLOW='\033[1;33m'
+RED='\033[1;31m'
+WHITE='\033[1;37m'
+GRAY='\033[0;90m'
 
 if [[ ! -t 1 ]]; then
     RESET=''; BOLD=''; GREEN=''; CYAN=''; YELLOW=''; RED=''; WHITE=''; GRAY=''
@@ -118,7 +118,8 @@ fi
 on_error() {
     local rc="$1" line="$2" cmd="$3"
     [[ "${BASHPID:-$$}" == "$$" ]] || return 0
-    printf '\n[1;31m✖[0m  Unexpected error (exit %s) at line %s:\n   %s\n'         "$rc" "$line" "$cmd" >&2
+    printf '\n\033[1;31m✖\033[0m  Unexpected error (exit %s) at line %s:\n   %s\n' \
+        "$rc" "$line" "$cmd" >&2
 }
 trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
@@ -491,7 +492,8 @@ replace_config_array() {
 }
 
 default_module_order() {
-    printf '%s\n'         last-login uptime load-average memory disk-usage logins processes services docker
+    printf '%s\n' \
+        last-login uptime load-average memory disk-usage logins processes services docker
 }
 
 module_file() {
@@ -600,7 +602,7 @@ backup_config_if_needed() {
 extract_existing_header() {
     local file="$MOTD_DIR/00-header"
     [[ -f "$file" ]] || return 1
-    sed -n 's/.*toilet.*-f[[:space:]]\+ivrit[[:space:]]*["'''\']\(.*\)["'''\'].*/\1/p' "$file" | head -n1
+    sed -n "s/.*toilet.*-f[[:space:]]\+ivrit[[:space:]]*[\"']\(.*\)[\"'].*/\1/p" "$file" | head -n1
 }
 
 write_default_config() {
@@ -651,7 +653,7 @@ write_default_config() {
     append_default_setting "WARN_PCT" "80"
     append_default_setting "CRIT_PCT" "90"
 
-    if ! grep -Eq '^MOTD_ORDER[[:space:]]*\\(' "$CONFIG_FILE"; then
+    if ! grep -Eq '^MOTD_ORDER[[:space:]]*\(' "$CONFIG_FILE"; then
         {
             echo
             echo 'MOTD_ORDER=('
@@ -671,11 +673,17 @@ initial_backup() {
         return 0
     fi
 
-    [[ -f "$MOTD_DIR/colors.txt" ]] && printf 'present\n' > "$COLORS_STATE" ||
+    if [[ -f "$MOTD_DIR/colors.txt" ]]; then
+        printf 'present\n' > "$COLORS_STATE"
+    else
         printf 'absent\n' > "$COLORS_STATE"
+    fi
 
     mkdir -p "$OLD_MOTD_DIR"
-    find "$MOTD_DIR" -mindepth 1 -maxdepth 1         ! -name old-motd         ! -name colors.txt         -exec mv {} "$OLD_MOTD_DIR"/ +
+    find "$MOTD_DIR" -mindepth 1 -maxdepth 1 \
+        ! -name old-motd \
+        ! -name colors.txt \
+        -exec mv {} "$OLD_MOTD_DIR"/ +
     ok "Original MOTD backed up to $OLD_MOTD_DIR"
 }
 
@@ -1053,7 +1061,9 @@ sync_motd_files() {
 
     if [[ ! -f "$MANIFEST_FILE" && ! -d "$LEGACY_MOTD_DIR" ]]; then
         mkdir -p "$LEGACY_MOTD_DIR"
-        find "$MOTD_DIR" -maxdepth 1 -type f             ! -name colors.txt             -exec cp -a {} "$LEGACY_MOTD_DIR"/ +
+        find "$MOTD_DIR" -maxdepth 1 -type f \
+            ! -name colors.txt \
+            -exec cp -a {} "$LEGACY_MOTD_DIR"/ +
         if find "$LEGACY_MOTD_DIR" -maxdepth 1 -type f -print -quit | grep -q .; then
             info "Previous MOTD detected; recovery copies saved in $LEGACY_MOTD_DIR"
         fi
@@ -1121,7 +1131,9 @@ download_source() {
     local tmp_dir="$1" archive="$2"
 
     section "Downloading MOTD"
-    if ! run_step "Downloading MOTD archive" curl --fail --location --silent --show-error         --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2         -o "$archive" "$REPO_URL"; then
+    if ! run_step "Downloading MOTD archive" curl --fail --location --silent --show-error \
+        --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2 \
+        -o "$archive" "$REPO_URL"; then
         fail "Download failed. Check DNS, Internet connectivity and GitHub access."
         section_end
         return 1
@@ -1571,7 +1583,16 @@ check_installation() {
     fi
 
     local legacy_exec=0
-    for file in         "$MOTD_DIR/01-last-login"         "$MOTD_DIR/03-uptime"         "$MOTD_DIR/04-load-average"         "$MOTD_DIR/05-memory"         "$MOTD_DIR/06-disk-usage"         "$MOTD_DIR/07-logins"         "$MOTD_DIR/08-processes"         "$MOTD_DIR/09-services"         "$MOTD_DIR/10-docker"
+    for file in \
+        "$MOTD_DIR/01-last-login" \
+        "$MOTD_DIR/03-uptime" \
+        "$MOTD_DIR/04-load-average" \
+        "$MOTD_DIR/05-memory" \
+        "$MOTD_DIR/06-disk-usage" \
+        "$MOTD_DIR/07-logins" \
+        "$MOTD_DIR/08-processes" \
+        "$MOTD_DIR/09-services" \
+        "$MOTD_DIR/10-docker"
     do
         if [[ -x "$file" ]]; then
             legacy_exec=1
