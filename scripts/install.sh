@@ -102,14 +102,14 @@ declare -A SERVICE_LABELS=(
     [beszel-agent]="Beszel Agent"
 )
 
-RESET='\033[0m'
-BOLD='\033[1m'
-GREEN='\033[1;32m'
-CYAN='\033[1;36m'
-YELLOW='\033[1;33m'
-RED='\033[1;31m'
-WHITE='\033[1;37m'
-GRAY='\033[0;90m'
+RESET='[0m'
+BOLD='[1m'
+GREEN='[1;32m'
+CYAN='[1;36m'
+YELLOW='[1;33m'
+RED='[1;31m'
+WHITE='[1;37m'
+GRAY='[0;90m'
 
 if [[ ! -t 1 ]]; then
     RESET=''; BOLD=''; GREEN=''; CYAN=''; YELLOW=''; RED=''; WHITE=''; GRAY=''
@@ -118,8 +118,7 @@ fi
 on_error() {
     local rc="$1" line="$2" cmd="$3"
     [[ "${BASHPID:-$$}" == "$$" ]] || return 0
-    printf '\n\033[1;31m✖\033[0m  Unexpected error (exit %s) at line %s:\n   %s\n' \
-        "$rc" "$line" "$cmd" >&2
+    printf '\n[1;31m✖[0m  Unexpected error (exit %s) at line %s:\n   %s\n'         "$rc" "$line" "$cmd" >&2
 }
 trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
@@ -267,7 +266,7 @@ confirm() {
 run_step() {
     local label="$1"
     shift
-    local log pid rc=0 i=0 frames='|/-\' mark_ok mark_fail
+    local log pid rc=0 i=0 mark_ok mark_fail
     log="$(mktemp)"
     printf -v mark_ok '%b✔%b' "$GREEN" "$RESET"
     printf -v mark_fail '%b✖%b' "$RED" "$RESET"
@@ -366,7 +365,7 @@ require_root() {
         rm -f "$tmp"
         fail "Could not download the installer for privileged re-execution."
         exit 1
-    fi
+    }
     sudo bash "$tmp" "$@"
     rc=$?
     rm -f "$tmp"
@@ -404,9 +403,9 @@ system_summary() {
     # shellcheck source=/dev/null
     . /etc/os-release 2>/dev/null || true
     section "System"
-    say "  ${GRAY}OS           :${RESET} ${PRETTY_NAME:-unknown}"
-    say "  ${GRAY}Hostname     :${RESET} $(hostname 2>/dev/null || echo unknown)"
-    say "  ${GRAY}Kernel       :${RESET} $(uname -r 2>/dev/null || echo unknown)"
+    say "  ${GRAY}OS            :${RESET} ${PRETTY_NAME:-unknown}"
+    say "  ${GRAY}Hostname      :${RESET} $(hostname 2>/dev/null || echo unknown)"
+    say "  ${GRAY}Kernel        :${RESET} $(uname -r 2>/dev/null || echo unknown)"
     say "  ${GRAY}Architecture :${RESET} $(uname -m 2>/dev/null || echo unknown)"
     say "  ${GRAY}MOTD profile :${RESET} ${OS_FLAVOR}"
     section_end
@@ -469,7 +468,7 @@ replace_config_array() {
     } > "$block"
 
     tmp="$(mktemp)"
-    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^[[:space:]]*$key[[:space:]]*\(" "$CONFIG_FILE"; then
+    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^[[:space:]]*${key}[[:space:]]*\(" "$CONFIG_FILE"; then
         awk -v key="$key" -v repl="$block" '
             $0 ~ "^[[:space:]]*" key "[[:space:]]*\\(" {
                 while ((getline line < repl) > 0) print line
@@ -478,7 +477,7 @@ replace_config_array() {
                 next
             }
             inside {
-                if ($0 ~ /^[[:space:]]*\)[[:space:]]*$/) inside=0
+                if ($0 ~ /^[[:space:]]*\\)[[:space:]]*$/) inside=0
                 next
             }
             {print}
@@ -492,8 +491,7 @@ replace_config_array() {
 }
 
 default_module_order() {
-    printf '%s\n' \
-        last-login uptime load-average memory disk-usage logins processes services docker
+    printf '%s\n'         last-login uptime load-average memory disk-usage logins processes services docker
 }
 
 module_file() {
@@ -522,16 +520,6 @@ array_contains() {
         [[ "$item" == "$needle" ]] && return 0
     done
     return 1
-}
-
-module_enabled() {
-    local needle="$1" item
-    if declare -p MOTD_DISABLED >/dev/null 2>&1; then
-        for item in "${MOTD_DISABLED[@]}"; do
-            [[ "$item" == "$needle" ]] && return 1
-        done
-    fi
-    return 0
 }
 
 normalize_motd_state() {
@@ -612,7 +600,7 @@ backup_config_if_needed() {
 extract_existing_header() {
     local file="$MOTD_DIR/00-header"
     [[ -f "$file" ]] || return 1
-    sed -n 's/.*toilet.*-f[[:space:]]\+ivrit[[:space:]]*["'\'']\(.*\)["'\''].*/\1/p' "$file" | head -n1
+    sed -n 's/.*toilet.*-f[[:space:]]\+ivrit[[:space:]]*["'''\']\(.*\)["'''\'].*/\1/p' "$file" | head -n1
 }
 
 write_default_config() {
@@ -687,10 +675,7 @@ initial_backup() {
         printf 'absent\n' > "$COLORS_STATE"
 
     mkdir -p "$OLD_MOTD_DIR"
-    find "$MOTD_DIR" -mindepth 1 -maxdepth 1 \
-        ! -name old-motd \
-        ! -name colors.txt \
-        -exec mv {} "$OLD_MOTD_DIR"/ +
+    find "$MOTD_DIR" -mindepth 1 -maxdepth 1         ! -name old-motd         ! -name colors.txt         -exec mv {} "$OLD_MOTD_DIR"/ +
     ok "Original MOTD backed up to $OLD_MOTD_DIR"
 }
 
@@ -757,7 +742,7 @@ discover_services() {
             [[ "$unit" == *.service ]] || continue
             service="${unit%.service}"
             case "$service" in
-                systemd-*|dbus*|getty*|user@*|NetworkManager*|ModemManager*|polkit*|snap*|apt*|packagekit*|cron*|rsyslog*|accounts-daemon*|udisks*|avahi*|systemd-timesyncd*)
+                systemd-*|dbus*|getty*|user@*|NetworkManager*|ModemManager*|polkit*|snap*|apt*|packagekit*|cron*|rsyslog*|accounts-daemon*|udisks*|avahi*)
                     continue
                     ;;
             esac
@@ -948,15 +933,15 @@ move_module() {
     case "$direction" in
         u|U)
             (( i > 0 )) || return 0
-            tmp="${MOTD_ORDER[$i]}"
-            MOTD_ORDER[$i]="${MOTD_ORDER[$((i - 1))]}"
-            MOTD_ORDER[$((i - 1))]="$tmp"
+            tmp="${MOTD_ORDER[i]}"
+            MOTD_ORDER[i]="${MOTD_ORDER[i - 1]}"
+            MOTD_ORDER[i - 1]="$tmp"
             ;;
         d|D)
             (( i < ${#MOTD_ORDER[@]} - 1 )) || return 0
-            tmp="${MOTD_ORDER[$i]}"
-            MOTD_ORDER[$i]="${MOTD_ORDER[$((i + 1))]}"
-            MOTD_ORDER[$((i + 1))]="$tmp"
+            tmp="${MOTD_ORDER[i]}"
+            MOTD_ORDER[i]="${MOTD_ORDER[i + 1]}"
+            MOTD_ORDER[i + 1]="$tmp"
             ;;
         *) return 0 ;;
     esac
@@ -1031,7 +1016,7 @@ configure_motd() {
                 system_summary
                 configure_services
                 echo
-                [[ -r /dev/tty ]] && read -r -p "Press Enter to return..." _ < /dev/tty || true
+                if [[ -r /dev/tty ]]; then read -r -p "Press Enter to return..." _ < /dev/tty || true; fi
                 ;;
             3)
                 load_config
@@ -1068,9 +1053,7 @@ sync_motd_files() {
 
     if [[ ! -f "$MANIFEST_FILE" && ! -d "$LEGACY_MOTD_DIR" ]]; then
         mkdir -p "$LEGACY_MOTD_DIR"
-        find "$MOTD_DIR" -maxdepth 1 -type f \
-            ! -name colors.txt \
-            -exec cp -a {} "$LEGACY_MOTD_DIR"/ +
+        find "$MOTD_DIR" -maxdepth 1 -type f             ! -name colors.txt             -exec cp -a {} "$LEGACY_MOTD_DIR"/ +
         if find "$LEGACY_MOTD_DIR" -maxdepth 1 -type f -print -quit | grep -q .; then
             info "Previous MOTD detected; recovery copies saved in $LEGACY_MOTD_DIR"
         fi
@@ -1138,9 +1121,7 @@ download_source() {
     local tmp_dir="$1" archive="$2"
 
     section "Downloading MOTD"
-    if ! run_step "Downloading MOTD archive" curl --fail --location --silent --show-error \
-        --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2 \
-        -o "$archive" "$REPO_URL"; then
+    if ! run_step "Downloading MOTD archive" curl --fail --location --silent --show-error         --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2         -o "$archive" "$REPO_URL"; then
         fail "Download failed. Check DNS, Internet connectivity and GitHub access."
         section_end
         return 1
@@ -1218,19 +1199,13 @@ restore_etc_motd() {
     rm -f "$ETC_MOTD_BACKUP" "$ETC_MOTD_STATE"
 }
 
-SSHD_EFFECTIVE="unknown"
-SSHD_QUERY_ERR=""
-
 sshd_query_printlastlog() {
     local out="" rc=0 value=""
-    SSHD_EFFECTIVE="unknown"
-    SSHD_QUERY_ERR=""
 
     out="$(sshd -T 2>&1)" || rc=$?
     out="${out//$'\r'/}"
 
     if (( rc != 0 )); then
-        SSHD_QUERY_ERR="${out%%$'\n'*}"
         rc=0
         out="$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>&1)" || rc=$?
         out="${out//$'\r'/}"
@@ -1596,16 +1571,7 @@ check_installation() {
     fi
 
     local legacy_exec=0
-    for file in \
-        "$MOTD_DIR/01-last-login" \
-        "$MOTD_DIR/03-uptime" \
-        "$MOTD_DIR/04-load-average" \
-        "$MOTD_DIR/05-memory" \
-        "$MOTD_DIR/06-disk-usage" \
-        "$MOTD_DIR/07-logins" \
-        "$MOTD_DIR/08-processes" \
-        "$MOTD_DIR/09-services" \
-        "$MOTD_DIR/10-docker"
+    for file in         "$MOTD_DIR/01-last-login"         "$MOTD_DIR/03-uptime"         "$MOTD_DIR/04-load-average"         "$MOTD_DIR/05-memory"         "$MOTD_DIR/06-disk-usage"         "$MOTD_DIR/07-logins"         "$MOTD_DIR/08-processes"         "$MOTD_DIR/09-services"         "$MOTD_DIR/10-docker"
     do
         if [[ -x "$file" ]]; then
             legacy_exec=1
@@ -1714,7 +1680,7 @@ show_menu() {
         esac
 
         echo
-        [[ -r /dev/tty ]] && read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true
+        if [[ -r /dev/tty ]]; then read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true; fi
     done
 }
 
