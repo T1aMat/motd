@@ -2,14 +2,13 @@
 # Installed to /etc/t1amat-motd.conf on first install.
 # This file is preserved across MOTD updates.
 #
-# MOTD_ORDER controls BOTH visibility and order:
-# - listed = enabled
-# - omitted = disabled
+# MOTD_ORDER contains ALL MOTD lines in their permanent display order.
+# MOTD_DISABLED contains lines that are currently hidden.
+# This lets you disable/re-enable a line without changing its position.
 #
-# Use the installer:
-#   4) Configure MOTD
-#
-# or edit this file manually.
+# Example:
+#   MOTD_ORDER=( uptime memory disk-usage services last-login ... )
+#   MOTD_DISABLED=( docker logins )
 
 MOTD_HEADER="T1aMat"
 
@@ -24,6 +23,9 @@ MOTD_ORDER=(
     services
     docker
 )
+
+# Empty by default. Remove a module from the MOTD without losing its position.
+MOTD_DISABLED=()
 
 # Services shown by 09-services.
 # The installer can auto-discover installed services and let you select them.
