@@ -2,7 +2,7 @@
 set -euo pipefail
 set -E
 
-SCRIPT_VERSION="3.2.2"
+SCRIPT_VERSION="3.2.3"
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/install.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
@@ -267,7 +267,7 @@ confirm() {
 run_step() {
     local label="$1"
     shift
-    local log pid rc=0 i=0 frames='|/-\' mark_ok mark_fail
+    local log pid rc=0 mark_ok mark_fail
     log="$(mktemp)"
     printf -v mark_ok '%b✔%b' "$GREEN" "$RESET"
     printf -v mark_fail '%b✖%b' "$RED" "$RESET"
@@ -275,7 +275,6 @@ run_step() {
     "$@" >"$log" 2>&1 &
     pid=$!
     while kill -0 "$pid" 2>/dev/null; do
-        i=$((i + 1))
         sleep 0.12
     done
     wait "$pid" || rc=$?
@@ -469,9 +468,9 @@ replace_config_array() {
     } > "$block"
 
     tmp="$(mktemp)"
-    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^[[:space:]]*$key[[:space:]]*\(" "$CONFIG_FILE"; then
+    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(" "$CONFIG_FILE"; then
         awk -v key="$key" -v repl="$block" '
-            $0 ~ "^[[:space:]]*" key "[[:space:]]*\\(" {
+            $0 ~ "^[[:space:]]*" key "[[:space:]]*=[[:space:]]*\\(" {
                 while ((getline line < repl) > 0) print line
                 close(repl)
                 inside=1
@@ -663,7 +662,7 @@ write_default_config() {
     append_default_setting "WARN_PCT" "80"
     append_default_setting "CRIT_PCT" "90"
 
-    if ! grep -Eq '^MOTD_ORDER[[:space:]]*\\(' "$CONFIG_FILE"; then
+    if ! grep -Eq '^[[:space:]]*MOTD_ORDER[[:space:]]*=[[:space:]]*\(' "$CONFIG_FILE"; then
         {
             echo
             echo 'MOTD_ORDER=('
@@ -759,7 +758,7 @@ discover_services() {
             [[ "$unit" == *.service ]] || continue
             service="${unit%.service}"
             case "$service" in
-                systemd-*|dbus*|getty*|user@*|NetworkManager*|ModemManager*|polkit*|snap*|apt*|packagekit*|cron*|rsyslog*|accounts-daemon*|udisks*|avahi*|systemd-timesyncd*)
+                systemd-*|dbus*|getty*|user@*|NetworkManager*|ModemManager*|polkit*|snap*|apt*|packagekit*|cron*|rsyslog*|accounts-daemon*|udisks*|avahi*)
                     continue
                     ;;
             esac
@@ -849,14 +848,6 @@ configure_services() {
     replace_config_array "MOTD_SERVICES" "${MOTD_SERVICES[@]}"
     ok "Services configuration saved."
     section_end
-}
-
-module_enabled() {
-    local needle="$1" item
-    for item in "${MOTD_ORDER[@]}"; do
-        [[ "$item" == "$needle" ]] && return 0
-    done
-    return 1
 }
 
 toggle_module() {
@@ -951,14 +942,14 @@ move_module() {
         u|U)
             (( i > 0 )) || return 0
             tmp="${MOTD_ORDER[$i]}"
-            MOTD_ORDER[$i]="${MOTD_ORDER[$((i - 1))]}"
-            MOTD_ORDER[$((i - 1))]="$tmp"
+            MOTD_ORDER[i]="${MOTD_ORDER[i - 1]}"
+            MOTD_ORDER[i - 1]="$tmp"
             ;;
         d|D)
             (( i < ${#MOTD_ORDER[@]} - 1 )) || return 0
             tmp="${MOTD_ORDER[$i]}"
-            MOTD_ORDER[$i]="${MOTD_ORDER[$((i + 1))]}"
-            MOTD_ORDER[$((i + 1))]="$tmp"
+            MOTD_ORDER[i]="${MOTD_ORDER[i + 1]}"
+            MOTD_ORDER[i + 1]="$tmp"
             ;;
         *) return 0 ;;
     esac
@@ -1033,7 +1024,9 @@ configure_motd() {
                 system_summary
                 configure_services
                 echo
-                [[ -r /dev/tty ]] && read -r -p "Press Enter to return..." _ < /dev/tty || true
+                if [[ -r /dev/tty ]]; then
+                    read -r -p "Press Enter to return..." _ < /dev/tty || true
+                fi
                 ;;
             3)
                 load_config
@@ -1222,18 +1215,13 @@ restore_etc_motd() {
 }
 
 SSHD_EFFECTIVE="unknown"
-SSHD_QUERY_ERR=""
-
 sshd_query_printlastlog() {
     local out="" rc=0 value=""
     SSHD_EFFECTIVE="unknown"
-    SSHD_QUERY_ERR=""
-
     out="$(sshd -T 2>&1)" || rc=$?
     out="${out//$'\r'/}"
 
     if (( rc != 0 )); then
-        SSHD_QUERY_ERR="${out%%$'\n'*}"
         rc=0
         out="$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>&1)" || rc=$?
         out="${out//$'\r'/}"
@@ -1718,7 +1706,9 @@ show_menu() {
         esac
 
         echo
-        [[ -r /dev/tty ]] && read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true
+        if [[ -r /dev/tty ]]; then
+            read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true
+        fi
     done
 }
 
