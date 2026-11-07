@@ -2,7 +2,7 @@
 set -euo pipefail
 set -E
 
-SCRIPT_VERSION="3.2.1"
+SCRIPT_VERSION="3.2.2"
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/install.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
@@ -267,7 +267,7 @@ confirm() {
 run_step() {
     local label="$1"
     shift
-    local log pid rc=0 i=0 mark_ok mark_fail
+    local log pid rc=0 i=0 frames='|/-\' mark_ok mark_fail
     log="$(mktemp)"
     printf -v mark_ok '%b✔%b' "$GREEN" "$RESET"
     printf -v mark_fail '%b✖%b' "$RED" "$RESET"
@@ -404,9 +404,9 @@ system_summary() {
     # shellcheck source=/dev/null
     . /etc/os-release 2>/dev/null || true
     section "System"
-    say "  ${GRAY}OS            :${RESET} ${PRETTY_NAME:-unknown}"
-    say "  ${GRAY}Hostname      :${RESET} $(hostname 2>/dev/null || echo unknown)"
-    say "  ${GRAY}Kernel        :${RESET} $(uname -r 2>/dev/null || echo unknown)"
+    say "  ${GRAY}OS           :${RESET} ${PRETTY_NAME:-unknown}"
+    say "  ${GRAY}Hostname     :${RESET} $(hostname 2>/dev/null || echo unknown)"
+    say "  ${GRAY}Kernel       :${RESET} $(uname -r 2>/dev/null || echo unknown)"
     say "  ${GRAY}Architecture :${RESET} $(uname -m 2>/dev/null || echo unknown)"
     say "  ${GRAY}MOTD profile :${RESET} ${OS_FLAVOR}"
     section_end
@@ -469,7 +469,7 @@ replace_config_array() {
     } > "$block"
 
     tmp="$(mktemp)"
-    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^[[:space:]]*${key}[[:space:]]*\(" "$CONFIG_FILE"; then
+    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^[[:space:]]*$key[[:space:]]*\(" "$CONFIG_FILE"; then
         awk -v key="$key" -v repl="$block" '
             $0 ~ "^[[:space:]]*" key "[[:space:]]*\\(" {
                 while ((getline line < repl) > 0) print line
@@ -478,7 +478,7 @@ replace_config_array() {
                 next
             }
             inside {
-                if ($0 ~ /^[[:space:]]*\\)[[:space:]]*$/) inside=0
+                if ($0 ~ /^[[:space:]]*\)[[:space:]]*$/) inside=0
                 next
             }
             {print}
@@ -522,6 +522,16 @@ array_contains() {
         [[ "$item" == "$needle" ]] && return 0
     done
     return 1
+}
+
+module_enabled() {
+    local needle="$1" item
+    if declare -p MOTD_DISABLED >/dev/null 2>&1; then
+        for item in "${MOTD_DISABLED[@]}"; do
+            [[ "$item" == "$needle" ]] && return 1
+        done
+    fi
+    return 0
 }
 
 normalize_motd_state() {
@@ -602,7 +612,7 @@ backup_config_if_needed() {
 extract_existing_header() {
     local file="$MOTD_DIR/00-header"
     [[ -f "$file" ]] || return 1
-    sed -n "s/.*toilet.*-f[[:space:]]\+ivrit[[:space:]]*[\"']\(.*\)[\"'].*/\1/p" "$file" | head -n1
+    sed -n 's/.*toilet.*-f[[:space:]]\+ivrit[[:space:]]*["'\'']\(.*\)["'\''].*/\1/p' "$file" | head -n1
 }
 
 write_default_config() {
@@ -653,7 +663,7 @@ write_default_config() {
     append_default_setting "WARN_PCT" "80"
     append_default_setting "CRIT_PCT" "90"
 
-    if ! grep -Eq '^MOTD_ORDER[[:space:]]*\(' "$CONFIG_FILE"; then
+    if ! grep -Eq '^MOTD_ORDER[[:space:]]*\\(' "$CONFIG_FILE"; then
         {
             echo
             echo 'MOTD_ORDER=('
@@ -673,17 +683,16 @@ initial_backup() {
         return 0
     fi
 
-    if [[ -f "$MOTD_DIR/colors.txt" ]]; then
-        printf 'present\n' > "$COLORS_STATE"
-    else
+    [[ -f "$MOTD_DIR/colors.txt" ]] && printf 'present\n' > "$COLORS_STATE" ||
         printf 'absent\n' > "$COLORS_STATE"
-    fi
 
     mkdir -p "$OLD_MOTD_DIR"
+    # With -exec ... +, {} must be the final argument before +.
+    # GNU mv -t lets the destination precede the collected source paths.
     find "$MOTD_DIR" -mindepth 1 -maxdepth 1 \
         ! -name old-motd \
         ! -name colors.txt \
-        -exec mv {} "$OLD_MOTD_DIR"/ +
+        -exec mv -t "$OLD_MOTD_DIR" -- {} +
     ok "Original MOTD backed up to $OLD_MOTD_DIR"
 }
 
@@ -750,7 +759,7 @@ discover_services() {
             [[ "$unit" == *.service ]] || continue
             service="${unit%.service}"
             case "$service" in
-                systemd-*|dbus*|getty*|user@*|NetworkManager*|ModemManager*|polkit*|snap*|apt*|packagekit*|cron*|rsyslog*|accounts-daemon*|udisks*|avahi*)
+                systemd-*|dbus*|getty*|user@*|NetworkManager*|ModemManager*|polkit*|snap*|apt*|packagekit*|cron*|rsyslog*|accounts-daemon*|udisks*|avahi*|systemd-timesyncd*)
                     continue
                     ;;
             esac
@@ -941,15 +950,15 @@ move_module() {
     case "$direction" in
         u|U)
             (( i > 0 )) || return 0
-            tmp="${MOTD_ORDER[i]}"
-            MOTD_ORDER[i]="${MOTD_ORDER[i - 1]}"
-            MOTD_ORDER[i - 1]="$tmp"
+            tmp="${MOTD_ORDER[$i]}"
+            MOTD_ORDER[$i]="${MOTD_ORDER[$((i - 1))]}"
+            MOTD_ORDER[$((i - 1))]="$tmp"
             ;;
         d|D)
             (( i < ${#MOTD_ORDER[@]} - 1 )) || return 0
-            tmp="${MOTD_ORDER[i]}"
-            MOTD_ORDER[i]="${MOTD_ORDER[i + 1]}"
-            MOTD_ORDER[i + 1]="$tmp"
+            tmp="${MOTD_ORDER[$i]}"
+            MOTD_ORDER[$i]="${MOTD_ORDER[$((i + 1))]}"
+            MOTD_ORDER[$((i + 1))]="$tmp"
             ;;
         *) return 0 ;;
     esac
@@ -1024,7 +1033,7 @@ configure_motd() {
                 system_summary
                 configure_services
                 echo
-                if [[ -r /dev/tty ]]; then read -r -p "Press Enter to return..." _ < /dev/tty || true; fi
+                [[ -r /dev/tty ]] && read -r -p "Press Enter to return..." _ < /dev/tty || true
                 ;;
             3)
                 load_config
@@ -1061,9 +1070,10 @@ sync_motd_files() {
 
     if [[ ! -f "$MANIFEST_FILE" && ! -d "$LEGACY_MOTD_DIR" ]]; then
         mkdir -p "$LEGACY_MOTD_DIR"
+        # Keep the same valid -exec ... + form for recovery copies.
         find "$MOTD_DIR" -maxdepth 1 -type f \
             ! -name colors.txt \
-            -exec cp -a {} "$LEGACY_MOTD_DIR"/ +
+            -exec cp -a -t "$LEGACY_MOTD_DIR" -- {} +
         if find "$LEGACY_MOTD_DIR" -maxdepth 1 -type f -print -quit | grep -q .; then
             info "Previous MOTD detected; recovery copies saved in $LEGACY_MOTD_DIR"
         fi
@@ -1211,13 +1221,19 @@ restore_etc_motd() {
     rm -f "$ETC_MOTD_BACKUP" "$ETC_MOTD_STATE"
 }
 
+SSHD_EFFECTIVE="unknown"
+SSHD_QUERY_ERR=""
+
 sshd_query_printlastlog() {
     local out="" rc=0 value=""
+    SSHD_EFFECTIVE="unknown"
+    SSHD_QUERY_ERR=""
 
     out="$(sshd -T 2>&1)" || rc=$?
     out="${out//$'\r'/}"
 
     if (( rc != 0 )); then
+        SSHD_QUERY_ERR="${out%%$'\n'*}"
         rc=0
         out="$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>&1)" || rc=$?
         out="${out//$'\r'/}"
@@ -1406,7 +1422,8 @@ install_motd() {
 
     section "Install MOTD"
     say "  ${GRAY}Profile:${RESET} ${WHITE}${OS_FLAVOR}${RESET}"
-    say "  Existing MOTD files are preserved on update when modified."
+    say "  Existing MOTD files are preserved on update"
+    say "  when modified."
     say "  Configuration lives in ${CONFIG_FILE}."
     section_end
     echo
@@ -1701,7 +1718,7 @@ show_menu() {
         esac
 
         echo
-        if [[ -r /dev/tty ]]; then read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true; fi
+        [[ -r /dev/tty ]] && read -r -p "Press Enter to return to the main menu..." _ < /dev/tty || true
     done
 }
 
