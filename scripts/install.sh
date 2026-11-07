@@ -2,7 +2,7 @@
 set -euo pipefail
 set -E
 
-SCRIPT_VERSION="3.2.3"
+SCRIPT_VERSION="3.2.4"
 SCRIPT_URL="https://raw.githubusercontent.com/T1aMat/motd/refs/heads/master/scripts/install.sh"
 REPO_URL="https://github.com/T1aMat/motd/archive/refs/heads/master.tar.gz"
 
@@ -181,6 +181,11 @@ panel_line() {
     else
         say "$text"
     fi
+}
+
+# Print a deliberate blank row between menu items and menu actions.
+panel_blank() {
+    say ""
 }
 
 banner() {
