@@ -139,7 +139,7 @@ done
 
 ((${#statuses[@]} > 0)) || exit 0
 
-prefix=" Services............:"
+prefix=" Services............: "
 plain_prefix="$(strip_ansi "$prefix")"
 prefix_len=${#plain_prefix}
 width="$(term_width)"
